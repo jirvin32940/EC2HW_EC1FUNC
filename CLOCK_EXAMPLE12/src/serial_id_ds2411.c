@@ -129,27 +129,6 @@ int		A, B, C, D, E, F, G, H, I, J;
 void SetSpeed(int standard)
 {
 	// Adjust tick values depending on speed
-#if 0//experiment 16may15
-	if (standard)
-	{
-		// Standard Speed
-//14may15 we can't seem to control this tightly		A = 6; //us
-		A = 6; //should be 6 14may15
-		B = 64;
-		C = 60;
-//14may15 we can't seem to control this tightly		D = 10;
-//14may15 we can't seem to control this tightly		E = 9;
-		D = 10; //should be 10 14may15
-		E = 9; //should be 9 14may15
-		F = 55;
-		G = 0;
-		H = 480;
-		I = 70;
-		J = 410;
-	}
-	
-#endif
-
 	if (standard) //experiment 16may15 cut everything in half, some issue with using the PLL? and fudge the tight numbers at the low end
 	{
 		// Standard Speed
@@ -235,11 +214,6 @@ void OWWriteBit(unsigned char idx, int bit)
 	{
 		// Write '1' bit
 		drive_DQ_low_and_release_the_bus(idx);
-#if 0
-		drive_DQ_low(idx);
-//14may15 take this out entirely, we can't seem to control this precisely enough		cpu_delay_us(A, EC_CPU_CLOCK_100MHZ	//tW1L 5-15us
-		release_the_bus(idx);
-#endif
 		udelay(B);	// Complete the time slot and 10us recovery tSLOT 65-??us (no max)
 	}
 	else
@@ -260,11 +234,6 @@ int OWReadBit(unsigned char idx)
 {
 	int result;
 
-#if 0
-	drive_DQ_low(idx);
-//14may15 take this out entirely, we can't seem to control this precisely enough	cpu_delay_us(A, EC_CPU_CLOCK_100MHZ	//tRL 5-15us
-	release_the_bus(idx);
-#endif
 	drive_DQ_low_and_release_the_bus(idx);
 	
 	udelay(E);	//tMSR 5-15us
