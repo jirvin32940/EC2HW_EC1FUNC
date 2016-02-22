@@ -633,7 +633,6 @@ volatile U16 adc_current_conversion;
 
 
 //TBD different scheme now #define EC_DOOR_LATCHED (!gpio_get_pin_value(ECLAVE_DOOR_LATCH)) //12apr15 this is the correct sense for the equipment going to the show
-//TBD different scheme now #define EC_ACTION_PB	(!gpio_get_pin_value(ECLAVE_ACTION_PB)) //12apr15 this is the correct sense for the equipment going to the show
 
 
 enum {

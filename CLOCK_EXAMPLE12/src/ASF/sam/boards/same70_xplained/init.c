@@ -359,7 +359,7 @@ void board_init(void)
 	ioport_set_pin_level(ECLAVE_LED_OEn, IOPORT_PIN_LEVEL_HIGH);
 
 	ioport_set_pin_dir(ECLAVE_MFP, IOPORT_DIR_OUTPUT);
-	ioport_set_pin_level(ECLAVE_MFP, IOPORT_PIN_LEVEL_LOW);
+	ioport_set_pin_level(ECLAVE_MFP, IOPORT_PIN_LEVEL_LOW);  //high=1x multiplier, low=4x multiplier 10apr15;
 
 	ioport_set_pin_dir(ECLAVE_SOLENOID, IOPORT_DIR_OUTPUT);
 	ioport_set_pin_level(ECLAVE_SOLENOID, IOPORT_PIN_LEVEL_LOW);

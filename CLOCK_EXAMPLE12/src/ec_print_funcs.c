@@ -123,7 +123,7 @@ void init_display_rs232_ex(unsigned long baudrate, long pba_hz)
 void print_ecdbg(const char *str)
 {
   // Redirection to the debug USART.
-  print(ECDBG_USART, str);
+  func_transmit(str, strlen(str));
 }
 
 void print_display(const char *str)

@@ -176,8 +176,7 @@ t_cpu_time mfpExperimentTimer;
 enum {
 	STATE_EC_IDLE,
 	STATE_DOOR_LATCHED,
-	STATE_ACTION_PB_PRESSED,
-	STATE_ACTION_PB_RELEASED,
+	STATE_VALID_KEYPAD_CODE,
 	STATE_START_SANITIZE,
 	STATE_SANITIZE,
 	STATE_START_CLEAN,
@@ -441,15 +440,9 @@ enum {
 
 volatile U16 adc_current_conversion;
 
-#define ECLAVE_DOOR_LATCH	AVR32_PIN_PB30
-#define ECLAVE_ACTION_PB	AVR32_PIN_PB31
-#define ECLAVE_DEBUG_LED	AVR32_PIN_PD28
-#define ECLAVE_PSUPPLY_ONn	AVR32_PIN_PA23
-#define ECLAVE_LED_OEn		AVR32_PIN_PA22
-#define ECLAVE_MFP			AVR32_PIN_PA21	//set to 1 for 1X, set to 0 for 4X
+uint8_t validKeypadCode = 0; //replaces ECLAVE_ACTION_PB from EC1
 
-#define EC_DOOR_LATCHED (!gpio_get_pin_value(ECLAVE_DOOR_LATCH)) //12apr15 this is the correct sense for the equipment going to the show
-#define EC_ACTION_PB	(!gpio_get_pin_value(ECLAVE_ACTION_PB)) //12apr15 this is the correct sense for the equipment going to the show
+#define EC_DOOR_LATCHED (ioport_get_pin_level(ECLAVE_DOORSW1) && ioport_get_pin_level(ECLAVE_DOORSW2))
 
 
 enum {
@@ -463,7 +456,7 @@ void display_text(unsigned char idx)
 {
 	for (int i = 0; i<7; i++)
 	{
-		usart_putchar(DISPLAY_USART, ((unsigned char) ((*(cmdPtrArray[idx]+i)))));
+		putchar(((unsigned char) ((*(cmdPtrArray[idx]+i)))));
 	}
 	
 }
@@ -483,40 +476,6 @@ void init_io(void)
 {
 	uint32_t ioFlags;
 	
-	
-	ioFlags = (GPIO_DIR_INPUT);
-	gpio_configure_pin(ECLAVE_DOOR_LATCH, ioFlags);
-
-	ioFlags = (GPIO_DIR_INPUT);
-	gpio_configure_pin(ECLAVE_ACTION_PB, ioFlags);
-
-	ioFlags = (GPIO_DIR_OUTPUT | GPIO_INIT_HIGH);
-	gpio_configure_pin(ECLAVE_SERIAL_ID0, ioFlags);
-
-	ioFlags = (GPIO_DIR_OUTPUT | GPIO_INIT_HIGH);
-	gpio_configure_pin(ECLAVE_SERIAL_ID1, ioFlags);
-
-	ioFlags = (GPIO_DIR_OUTPUT | GPIO_INIT_HIGH);
-	gpio_configure_pin(ECLAVE_SERIAL_ID2, ioFlags);
-
-	ioFlags = (GPIO_DIR_OUTPUT | GPIO_INIT_HIGH);
-	gpio_configure_pin(ECLAVE_SERIAL_ID3, ioFlags);
-
-	ioFlags = (GPIO_DIR_OUTPUT | GPIO_INIT_HIGH);
-	gpio_configure_pin(ECLAVE_SERIAL_ID4, ioFlags);
-
-	ioFlags = (GPIO_DIR_OUTPUT | GPIO_INIT_LOW);
-	gpio_configure_pin(ECLAVE_DEBUG_LED, ioFlags);
-
-	ioFlags = (GPIO_DIR_OUTPUT | GPIO_INIT_HIGH);
-	gpio_configure_pin(ECLAVE_PSUPPLY_ONn, ioFlags);
-
-	ioFlags = (GPIO_DIR_OUTPUT | GPIO_INIT_HIGH);
-	gpio_configure_pin(ECLAVE_LED_OEn, ioFlags);
-
-	ioFlags = (GPIO_DIR_OUTPUT | GPIO_INIT_LOW); //high=1x multiplier, low=4x multiplier 10apr15;
-	gpio_configure_pin(ECLAVE_MFP, ioFlags);
-
 }
 
 
@@ -688,84 +647,47 @@ void check_led_brd_side_lifetimes(void)
 }
 
 
-
-// ADC Configuration
-adcifa_opt_t adc_config_t = {
-	.frequency                = 1000000,        // ADC frequency (Hz)
-//26apr15	.reference_source         = ADCIFA_ADCREF0, // Reference Source
-//31may15 experiment	.reference_source		  = ADCIFA_ADCREF,  // Reference Source 26apr15
-	.reference_source = ADCIFA_REF1V,			//31may15 experiment
-	.sample_and_hold_disable  = false,    		// Disable Sample and Hold Time
-	.single_sequencer_mode    = true,   		// Single Sequencer Mode change to true 30may15
-	.free_running_mode_enable = false,    		// Free Running Mode
-	.sleep_mode_enable        = false,    		// Sleep Mode
-	.mux_settle_more_time     = false     		// Multiplexer Settle Time
-};
-
-// Sequencer Configuration: same for all sequencers
-adcifa_sequencer_opt_t adcifa_sequence_opt = {
-	NUMBER_OF_INPUTS_ADC_SEQ0,
-	ADCIFA_SRES_12B,
-	ADCIFA_TRGSEL_SOFT,
-//26apr15	ADCIFA_SOCB_ALLSEQ,
-	ADCIFA_SOCB_SINGLECONV, //26apr15
-	ADCIFA_SH_MODE_STANDARD, //30may15
-	ADCIFA_HWLA_NOADJ,
-	ADCIFA_SA_NO_EOS_SOFTACK
-};
-
-int16_t adc_values_seq0;
-adcifa_sequencer_conversion_opt_t
-adcifa_sequence_conversion_opt_seq0_shelf[4] = {
-	{
-		INPUT1_ADC_INP,
-		INPUT1_ADC_INN,
-		ADCIFA_SHG_1
-	},
-	{
-		INPUT2_ADC_INP,
-		INPUT2_ADC_INN,
-		ADCIFA_SHG_1
-	},
-	{
-		INPUT3_ADC_INP,
-		INPUT3_ADC_INN,
-		ADCIFA_SHG_1
-	},
-	{
-		INPUT4_ADC_INP,
-		INPUT4_ADC_INN,
-		ADCIFA_SHG_1
-	}
-};
-
-volatile avr32_adcifa_t *adcifa = &AVR32_ADCIFA; // ADCIFA IP registers address
-
 int16_t adc_process_task(unsigned char shelfIdx);
 int16_t adc_process_task(unsigned char shelfIdx)
 {
-	// Configure ADCIFA sequencer 0 for this particular shelf
-	adcifa_configure_sequencer(adcifa, 0, &adcifa_sequence_opt,
-		&adcifa_sequence_conversion_opt_seq0_shelf[shelfIdx]);
-
-	// Start ADCIFA sequencer 0
-	adcifa_start_sequencer(adcifa, 0);
-
-	// Get Values from sequencer 0
-	while(1)
+	
+	switch(shelfIdx)
 	{
-		//TODO: need a timeout here and error handling in case the ADC gets stuck for some reason
-		
-		if (adcifa_get_values_from_sequencer(adcifa, 0, &adcifa_sequence_opt, &adc_values_seq0) == ADCIFA_STATUS_COMPLETED) 
-		{
-			bluesense_buf[shelfIdx] = adc_values_seq0;
-//30may15			if (bluesense_buf[shelfIdx] & 0x8000) //30may15 this number is 2's complement, we should just set negative numbers to 0
-//30may15			{
-//30may15				bluesense_buf[shelfIdx] = 0;
-//30may15			}
-			return bluesense_buf[shelfIdx];
-		}
+		case 0:
+			afec_channel_enable(AFEC1, AFEC_CHANNEL_9);
+			afec_start_software_conversion(AFEC1);
+			is_conversion_done = false;
+			while (is_conversion_done == false);
+			bluesense_buf[shelfIdx] = g_afec1_sample_data;
+			afec_channel_disable(AFEC1, AFEC_CHANNEL_9);
+			break;
+		case 1:
+			afec_channel_enable(AFEC0, AFEC_CHANNEL_4);
+			afec_start_software_conversion(AFEC0);
+			is_conversion_done = false;
+			while (is_conversion_done == false);
+			bluesense_buf[shelfIdx] = g_afec0_sample_data;
+			afec_channel_disable(AFEC0, AFEC_CHANNEL_4);
+			break;
+		case 2:
+			afec_channel_enable(AFEC1, AFEC_CHANNEL_4);
+			afec_start_software_conversion(AFEC1);
+			is_conversion_done = false;
+			while (is_conversion_done == false);
+			bluesense_buf[shelfIdx] = g_afec1_sample_data;
+			afec_channel_disable(AFEC1, AFEC_CHANNEL_4);
+			break;
+		case 3:
+			afec_channel_enable(AFEC1, AFEC_CHANNEL_5);
+			afec_start_software_conversion(AFEC1);
+			is_conversion_done = false;
+			while (is_conversion_done == false);
+			bluesense_buf[shelfIdx] = g_afec1_sample_data;
+			afec_channel_disable(AFEC1, AFEC_CHANNEL_5);
+			break;		
 	}
+	
+	return bluesense_buf[shelfIdx];
 }
 
 
@@ -1176,39 +1098,6 @@ void adc_process_init(void)
  *
  *
  */
-/*! \brief TWI Initialization for QTouch Controller
- *
- *
- */
-static void twi_init(void);
-static void twi_init(void)
-{
-	const gpio_map_t PCA9952_TWI_GPIO_MAP = {
-		{PCA9952_TWI_SCL_PIN, PCA9952_TWI_SCL_FUNCTION},
-		{PCA9952_TWI_SDA_PIN, PCA9952_TWI_SDA_FUNCTION}
-	};
-
-	twi_options_t PCA9952_TWI_OPTIONS = { //7apr15 make this *not* a const so we can change it and rerun twi_master_init() if necessary
-		.pba_hz = FPBA_HZ,
-		.speed = PCA9952_TWI_MASTER_SPEED,
-		.chip = PCA9952_U7_TOPDRIVE_TWI_ADDRESS, //7apr15
-		.smbus        = false,
-	};
-
-	// Assign I/Os to TWI.
-	gpio_enable_module(PCA9952_TWI_GPIO_MAP,
-	sizeof(PCA9952_TWI_GPIO_MAP) / sizeof(PCA9952_TWI_GPIO_MAP[0]));
-	// Initialize as master.
-	twi_master_init(PCA9952_TWI, &PCA9952_TWI_OPTIONS);
-	
-	
-	PCA9952_TWI_OPTIONS.chip = PCA9952_U8_BOTDRIVE_TWI_ADDRESS;
-	// Initialize as master.
-	twi_master_init(PCA9952_TWI, &PCA9952_TWI_OPTIONS);
-	
-	
-}
-
 
 
 unsigned char calc_sanitize_time(unsigned char shelfIdx);
@@ -2701,11 +2590,16 @@ void service_ecdbg_input(void)
 	int rx_char;
 	unsigned int tmpNewDte;
 	unsigned char tryToChangeDte = 0;
-
-	if (usart_read_char(ECDBG_USART, &rx_char) != USART_SUCCESS)
+	
+	
+	if (usart_is_rx_ready(BOARD_USART)) {
+		usart_read(BOARD_USART, (uint32_t *)&rx_char);
+	}
+	else
 	{
 		return;
 	}
+
 
 	if (rx_char == USART_FAILURE)
 	{
@@ -2743,7 +2637,7 @@ void service_ecdbg_input(void)
 
 	cmd[cmdIdx++] = rx_char;
 	
-	usart_putchar(ECDBG_USART, rx_char);
+	putchar(rx_char);
 	if (rx_char == '\r')
 	{ 
 		if (cmdIdx == 2)
@@ -2883,7 +2777,7 @@ int main(void){
 	// Initialize TWI Interface
 	twi_init();
 
-	gpio_set_pin_high(ECLAVE_LED_OEn); //make sure outputs are disabled at the chip level
+	ioport_set_pin_level(ECLAVE_LED_OEn, IOPORT_PIN_LEVEL_HIGH); //make sure outputs are disabled at the chip level
 
 	PCA9952_init();
 	test_led_driver_channels();
@@ -2896,8 +2790,8 @@ int main(void){
 	show_chassis_all_LED_boards();
 	show_help_and_prompt();
 	
-	gpio_set_pin_low(ECLAVE_LED_OEn); //...and we are live!
-	gpio_set_pin_low(ECLAVE_PSUPPLY_ONn); //turn the leds on first and then the power supply
+	ioport_set_pin_level(ECLAVE_LED_OEn, IOPORT_PIN_LEVEL_LOW); //...and we are live!
+	ioport_set_pin_level(ECLAVE_PSUPPLY_ONn, IOPORT_PIN_LEVEL_LOW);
 	
 	cpu_set_timeout(EC_ONE_SECOND/2, &debugTimer);
 	cpu_set_timeout((5 * EC_ONE_SECOND), &mfpExperimentTimer); //experiment 31may15
@@ -2911,7 +2805,7 @@ int main(void){
 		{
 			case STATE_EC_IDLE:
 				if (EC_DOOR_LATCHED) {
-					gpio_set_pin_low(ECLAVE_DEBUG_LED);
+					ioport_set_pin_level(EXAMPLE_LED_GPIO, IOPORT_PIN_LEVEL_LOW);
 					print_ecdbg("Door latch detected\r\n");
 					firstTimeSinceDoorLatched = 1;
 //					display_text(IDX_CLEAR);
@@ -2922,21 +2816,14 @@ int main(void){
 				break;
 				
 			case STATE_DOOR_LATCHED:
-				if (!EC_ACTION_PB) {
-					print_ecdbg("Action push button press detected\r\n");
-					electroclaveState = STATE_ACTION_PB_PRESSED;
+				if (validKeypadCode) {
+					print_ecdbg("Valid keypad code detected\r\n");
+					electroclaveState = STATE_VALID_KEYPAD_CODE;
+					validKeypadCode = 0; //reset
 				}
 				break;
 				
-			case STATE_ACTION_PB_PRESSED:
-				if (EC_ACTION_PB)
-				{
-					print_ecdbg("Action push button release detected\r\n");
-					electroclaveState = STATE_ACTION_PB_RELEASED;	
-				}
-				break;
-				
-			case STATE_ACTION_PB_RELEASED:
+			case STATE_VALID_KEYPAD_CODE:
 
 				if (firstTimeSinceDoorLatched)
 				{
@@ -3105,7 +2992,7 @@ int main(void){
 			case STATE_CLEAN:
 				if (cpu_is_timeout(&cleanTimer)) {
 					cpu_stop_timeout(&cleanTimer);
-					electroclaveState = STATE_ACTION_PB_RELEASED;	
+					electroclaveState = STATE_VALID_KEYPAD_CODE;	
 				}
 				break;
 				
@@ -3250,7 +3137,7 @@ int main(void){
 		{
 			cpu_stop_timeout(&debugTimer);
 			cpu_set_timeout((EC_ONE_SECOND/2), &debugTimer);
-			gpio_toggle_pin(ECLAVE_DEBUG_LED);
+			ioport_toggle_pin_level(EXAMPLE_LED_GPIO);
 		}
 		
 		service_ecdbg_input();
