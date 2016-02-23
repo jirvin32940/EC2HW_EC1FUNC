@@ -2,7 +2,7 @@
  * \file
  *
  * \brief Seal Shield Electroclave device sanitizer
- * based on Atmel's AVR UC3C CAN-LIN Loopback Demo
+ * based on Atmel's AVR UC3C CAN-LIN Loopback Demo and Atmel SAME70 RS485 and many other demos
  *
  * Copyright (c) 2011-2014 Atmel Corporation. All rights reserved.
  *
@@ -60,6 +60,7 @@
  * Support and FAQ: visit <a href="http://www.atmel.com/design-support/">Atmel Support</a>
  */
 
+#if 0 //these includes are from the Electroclave Gen I hardware project
 #include "compiler.h"
 #include "power_clocks_lib.h"
 #include "gpio.h"
@@ -79,6 +80,20 @@
 #include "ctype.h"
 #include "sysclk.h"
 #include <pll.h>
+#endif
+
+#include <string.h>
+#include "asf.h"
+#include "stdio_serial.h"
+#include "conf_board.h"
+#include "conf_clock.h"
+#include "conf_example.h"
+#include "pca9952.h"
+#include "serial_id_ds2411.h"
+#include "afec.h"
+#include "ec_print_funcs.h" //8apr15 changed from print_funcs.h
+
+
 
 
 unsigned char read_usage_struct(unsigned char sel);
@@ -475,7 +490,17 @@ void init_io(void);
 void init_io(void)
 {
 	uint32_t ioFlags;
-	
+
+	ioport_set_pin_dir(ECLAVE_SERIAL_ID0, IOPORT_DIR_OUTPUT);
+	ioport_set_pin_level(ECLAVE_SERIAL_ID0, IOPORT_PIN_LEVEL_HIGH);
+	ioport_set_pin_dir(ECLAVE_SERIAL_ID1, IOPORT_DIR_OUTPUT);
+	ioport_set_pin_level(ECLAVE_SERIAL_ID1, IOPORT_PIN_LEVEL_HIGH);
+	ioport_set_pin_dir(ECLAVE_SERIAL_ID2, IOPORT_DIR_OUTPUT);
+	ioport_set_pin_level(ECLAVE_SERIAL_ID2, IOPORT_PIN_LEVEL_HIGH);
+	ioport_set_pin_dir(ECLAVE_SERIAL_ID3, IOPORT_DIR_OUTPUT);
+	ioport_set_pin_level(ECLAVE_SERIAL_ID3, IOPORT_PIN_LEVEL_HIGH);
+	ioport_set_pin_dir(ECLAVE_SERIAL_ID4, IOPORT_DIR_OUTPUT);
+	ioport_set_pin_level(ECLAVE_SERIAL_ID4, IOPORT_PIN_LEVEL_HIGH);
 }
 
 
@@ -701,7 +726,7 @@ enum {
 unsigned char check_shelf_for_devices(unsigned char shelfPosition);
 unsigned char check_shelf_for_devices(unsigned char shelfPosition)
 {
-	U16 bluesense[8] = {0,0,0,0,0,0,0,0};
+	uint16_t bluesense[8] = {0,0,0,0,0,0,0,0};
 	unsigned long bluesenseAccumulated = 0;
 	unsigned int bluesenseAvg = 0;
 	
@@ -709,7 +734,7 @@ unsigned char check_shelf_for_devices(unsigned char shelfPosition)
 	
 	led_shelf(shelfPosition, LED_ON); //TODO: do we finish this task fast enough to not check the door latch in here? Can't have LEDs on if the door opens
 	
-	cpu_delay_ms(100, EC_CPU_CLOCK_FREQ); //30may15 was 50ms, trying 100 to see if we can get more consistent
+	mdelay(100); //30may15 was 50ms, trying 100 to see if we can get more consistent
 		
 	//Read bluesense for this shelf
 
@@ -871,7 +896,7 @@ void test_led_driver_channels(void)
 			}
 		}
 		
-		cpu_delay_us(100,EC_CPU_CLOCK_FREQ); //maybe need this while testing LED boards with resistors in place of real LEDs 31july2015
+		udelay(100); //maybe need this while testing LED boards with resistors in place of real LEDs 31july2015
 
 		PCA9952_write_reg(LED_TOP, PCA9952_MODE2, 0x40); //starts fault test
 		PCA9952_write_reg(LED_BOTTOM, PCA9952_MODE2, 0x40); //starts fault test
@@ -1029,75 +1054,11 @@ unsigned char num_present_shelves(void)
 
 /*! \brief Initializes the MCU system clocks.
  */
-/*
- * Using RC8M (internal 8MHz)
- */
-void init_sys_clocks(void);
-void init_sys_clocks(void)
-{
-	struct pll_config pcfg;
-	
-
-//this kinda works for 100MHz, problems with TWIM, but maybe we can work around that 17may15
-/*
- * From CLOCK_EXAMPLE31 which changes clock sources on the fly. Trying to get a faster clock so that we can work with the serial ID chip (DS2411) which needs control to 6us. 16may15
- */
-	osc_enable(OSC_ID_RC8M);
-	pll_config_init(&pcfg, PLL_SRC_RC8M, 1, EC_CPU_CLOCK_100MHZ/OSC_RC8M_NOMINAL_HZ);
-	pll_enable(&pcfg, 0);
-	sysclk_set_prescalers(1,1,1,1);
-	pll_wait_for_lock(0);
-	sysclk_set_source(SYSCLK_SRC_PLL0);	
-
-
-	/* put the clock out on PC19 so we can check to make sure we set it up correctly */
-	//Note this code comes from ASF example AVR32 SCIF example 3
-//16may15 seems to cause problems, leave out for now	scif_start_gclk(AVR32_SCIF_GCLK_GCLK0PIN, &gclkOpt);
-//16may15 seems to cause problems, leave out for now	gpio_enable_module_pin(AVR32_SCIF_GCLK_0_1_PIN, AVR32_SCIF_GCLK_0_1_FUNCTION);
-
-}
 
 volatile bool input_fft_view = false;
 volatile bool output_fft_view = false;
 volatile bool zoom_view = false;
 volatile int32_t zoom_view_id;
-
-/*! \brief ADC Process Init
- *
- *
- */
-
-void adc_process_init(void);
-void adc_process_init(void)
-{
-	// GPIO pin/adc-function map.
-	static const gpio_map_t ADCIFA_GPIO_MAP = {
-//26apr15 using internal ref now		{AVR32_ADCREF0_PIN,AVR32_ADCREF0_FUNCTION},
-		{AVR32_ADCREFP_PIN,AVR32_ADCREFP_FUNCTION},
-		{AVR32_ADCREFN_PIN,AVR32_ADCREFN_FUNCTION},
-		{INPUT1_ADC_PIN, INPUT1_ADC_FUNCTION},
-		{INPUT2_ADC_PIN, INPUT2_ADC_FUNCTION},
-		{INPUT3_ADC_PIN, INPUT3_ADC_FUNCTION},
-		{INPUT4_ADC_PIN, INPUT4_ADC_FUNCTION}
-	};
-
-
-	// Assign and enable GPIO pins to the ADC function.
-	gpio_enable_module(ADCIFA_GPIO_MAP,
-			sizeof(ADCIFA_GPIO_MAP) / sizeof(ADCIFA_GPIO_MAP[0]));
-
-	// Get ADCIFA Factory Configuration
-	adcifa_get_calibration_data(adcifa, &adc_config_t);
-
-	// Configure ADCIFA core
-	adcifa_configure(adcifa, &adc_config_t, EC_CPU_CLOCK_FREQ);
-
-}
-
-/*! \brief ADC Process Task
- *
- *
- */
 
 
 unsigned char calc_sanitize_time(unsigned char shelfIdx);
@@ -1322,7 +1283,7 @@ enum{CHECKSUM_INVALID, CHECKSUM_VALID};
 
 enum {SUCCESS, ERROR};
 
-
+#if 0 //ignore for now 22feb16
 unsigned char test_flash(unsigned char sel)
 {
 	volatile void* memPtr;
@@ -1368,7 +1329,7 @@ unsigned char test_flash(unsigned char sel)
 	
 	return SUCCESS;
 }
-
+#endif //22feb16 ignore for now
 
 unsigned char calc_region_checksum(unsigned char sel);
 unsigned char calc_region_checksum(unsigned char sel)
@@ -1426,6 +1387,7 @@ unsigned char calc_region_checksum(unsigned char sel)
 	return csum;	
 }
 
+#if 0 //22feb16 ignore for now
 unsigned char eval_region(unsigned char sel);
 unsigned char eval_region(unsigned char sel)
 {
@@ -1886,6 +1848,8 @@ void disrupt_prior_m_sector(void)
 	
 }
 
+#endif //22feb16 ignore for now
+
 #define USAGE_FULL 0xFF
 
 unsigned char find_first_open_usage_slot(void);
@@ -2013,7 +1977,7 @@ void inc_sanCycles(void)
 		sanCycleFlashIdx = 0;
 	}
 	sanc.csum = calc_region_checksum(1);
-	write_region_to_flash(1, 0xFF, sanc.csum);
+//skip for now 22feb16	write_region_to_flash(1, 0xFF, sanc.csum);
 }
 
 void store_config(void);
@@ -2026,7 +1990,7 @@ void store_config(void)
 		configFlashIdx = 0;
 	}
 	c.csum = calc_region_checksum(4);
-	write_region_to_flash(4, 0xFF, c.csum);
+//skip for now 22feb16	write_region_to_flash(4, 0xFF, c.csum);
 }
 
 void increment_ledBoard_usage_min(void)
@@ -2085,9 +2049,9 @@ void increment_ledBoard_usage_min(void)
 		mFlashIdx = 0;
 	}
 	m.csum = calc_region_checksum(3);
-	write_region_to_flash(3, 0xFF, m.csum);
-	copy_region_to_another_sector(3);
-	disrupt_prior_m_sector();
+//skip for now 22feb16	write_region_to_flash(3, 0xFF, m.csum);
+//skip for now 22feb16	copy_region_to_another_sector(3);
+//skip for now 22feb16	disrupt_prior_m_sector();
 
 	if (hourRollover)
 	{
@@ -2097,7 +2061,7 @@ void increment_ledBoard_usage_min(void)
 			hFlashIdx = 0;
 		}
 		h.csum = calc_region_checksum(2);
-		write_region_to_flash(2, 0xFF, h.csum);
+//skip for now 22feb16		write_region_to_flash(2, 0xFF, h.csum);
 
 		hourRollover = 0; //reset for next pass
 	}
@@ -2220,28 +2184,28 @@ void init_led_board_info(void)
 
 		//serial ID and flags
 		csum = calc_region_checksum(0);
-		write_region_to_flash(0, 0xFF, csum);
-		copy_region_to_another_sector(0);
+//skip for now 22feb16		write_region_to_flash(0, 0xFF, csum);
+//skip for now 22feb16		copy_region_to_another_sector(0);
 
 		//san cycles
 		csum = calc_region_checksum(1);
-		write_region_to_flash(1,  0xFF, csum);
-		copy_region_to_another_sector(1);
+//skip for now 22feb16		write_region_to_flash(1,  0xFF, csum);
+//skip for now 22feb16		copy_region_to_another_sector(1);
 
 		//usage hours
 		csum = calc_region_checksum(2);
-		write_region_to_flash(2,  0xFF, csum);
-		copy_region_to_another_sector(2);
+//skip for now 22feb16		write_region_to_flash(2,  0xFF, csum);
+//skip for now 22feb16		copy_region_to_another_sector(2);
 
 		//usage minutes
 		csum = calc_region_checksum(3);
-		write_region_to_flash(3,  0xFF, csum);
-		copy_region_to_another_sector(3);
+//skip for now 22feb16		write_region_to_flash(3,  0xFF, csum);
+//skip for now 22feb16		copy_region_to_another_sector(3);
 
 		//configuration
 		csum = calc_region_checksum(4);
-		write_region_to_flash(4,  0xFF, csum);
-		copy_region_to_another_sector(4);
+//skip for now 22feb16		write_region_to_flash(4,  0xFF, csum);
+//skip for now 22feb16		copy_region_to_another_sector(4);
 
 	}
 	else
@@ -2255,6 +2219,7 @@ void init_led_board_info(void)
 
 		for (int i=0; i<5; i++)
 		{
+#if 0 //22feb16 skip this for now			
 			if (test_flash(i) == ERROR)
 			{
 				print_ecdbg("Flash area ERROR: region ");
@@ -2263,7 +2228,7 @@ void init_led_board_info(void)
 				sysErr.flashArea |= BIT(i); //SE_FAIL;
 				chassis_error();
 			}
-
+#endif
 		}
 		add_new_led_board_sides_to_usage();
 		load_usageIdx_to_ledBrdSide();
@@ -2272,8 +2237,8 @@ void init_led_board_info(void)
 		{
 			unsigned char csum;
 			csum = calc_region_checksum(i);
-			write_region_to_flash(i,  0xFF, csum);
-			copy_region_to_another_sector(i);
+//skip for now 22feb16			write_region_to_flash(i,  0xFF, csum);
+//skip for now 22feb16			copy_region_to_another_sector(i);
 		}
 	}
 }
@@ -2723,6 +2688,7 @@ void service_ecdbg_input(void)
 	}
 }
 
+#define EXAMPLE_LED_GPIO    LED0_GPIO
 
 
 /*! \brief Main File Section:
@@ -2732,51 +2698,50 @@ int main(void){
 	static unsigned char displayIdx = 0;
 	char mainStr[80];
 	
-	// Initialize System Clock
-	init_sys_clocks();
+	/* Initialize the SAM system. */
+	sysclk_init();
+	board_init();
 
 	init_io();
+	
+	/* Configure UART for blue scrolling display */
+	configure_console();
+
+	/* Configure USART. */
+	configure_usart();
+
+	/* 1ms tick. */
+	configure_systick();
+
+	init_pwm();
 	
 	init_sysErr();
 	
 	init_shelf_n_ledBrd_structs();
 	read_led_board_serial_ids();
 		
+	twi_init();
 
+//make this ecII jsi 7feb16	gpio_set_pin_high(ECLAVE_LED_OEn); //make sure outputs are disabled at the chip level
 
-	//Set clock to 8MHz. We start at 100MHz to get through the DS2411 LED board serial ID detection. But we don't need to run that fast for remaining operations.
-	osc_enable(OSC_ID_RC8M);
-	osc_wait_ready(OSC_ID_RC8M);
-	sysclk_set_source(SYSCLK_SRC_RC8M);
-	sysclk_set_prescalers(0,0,0,0);
-	pll_disable(0);
+	PCA9952_init();
 
-
-
-	// Initialize USART again after changing the system clock
-	init_ecdbg_rs232(FPBA_HZ);
-//30may15	init_display_rs232(FPBA_HZ);
-	init_display_rs232(FOSC0);//experiment to see if this fixes the display, haven't tested the code with the display in a month and it doesn't work now 30may15
+	init_adc();
 	
+	/*
+	 * Enable transmitter here, and disable receiver first, to avoid receiving
+	 * characters sent by itself. It's necessary for half duplex RS485.
+	 */
+	usart_enable_tx(BOARD_USART);
+	usart_enable_rx(BOARD_USART);
+
+
+
 	show_sw_version();
 
 	// Print Startup Message
 	display_text(IDX_READY);
 	
-	// Initialize ADC for bluesense channels which are used to see if there are any devices (phones, tablets, etc.) on the shelves
-	adc_process_init();
-
-	
-	// Initialize Interrupts
-	irq_initialize_vectors(); //TODO: probably remove 5apr15
-
-	cpu_irq_enable();
-
-
-	
-	// Initialize TWI Interface
-	twi_init();
-
 	ioport_set_pin_level(ECLAVE_LED_OEn, IOPORT_PIN_LEVEL_HIGH); //make sure outputs are disabled at the chip level
 
 	PCA9952_init();
@@ -2799,8 +2764,6 @@ int main(void){
 	// Main loop
 	while (true) 
 	{
-
-
 		switch(electroclaveState)
 		{
 			case STATE_EC_IDLE:

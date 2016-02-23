@@ -901,7 +901,7 @@ void init_pwm(void)
 
 #  define EXAMPLE_LED_GPIO    LED0_GPIO
 
-int main(void) //6feb16 this version of main has been hacked up for only exactly what we need
+int alt_main(void) //6feb16 this version of main has been hacked up for only exactly what we need
 {
 	char		txBuf[11] = {0,0,0,0,0,0,0,0,0,0,0}, rxByte;
 	uint32_t	i;	

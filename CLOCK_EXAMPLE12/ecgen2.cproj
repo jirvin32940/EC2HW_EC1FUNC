@@ -1042,6 +1042,12 @@
     <Compile Include="src\config\conf_uart_serial.h">
       <SubType>compile</SubType>
     </Compile>
+    <Compile Include="src\ec_print_funcs.c">
+      <SubType>compile</SubType>
+    </Compile>
+    <Compile Include="src\ec_print_funcs.h">
+      <SubType>compile</SubType>
+    </Compile>
     <Compile Include="src\pca9952.c">
       <SubType>compile</SubType>
     </Compile>
