@@ -44,9 +44,13 @@ src\ASF\sam\utils\cmsis\same70\source\templates\system_same70.c
 
 src\ASF\sam\utils\syscalls\gcc\syscalls.c
 
+src\ec_print_funcs.c
+
 src\pca9952.c
 
 src\serial_id_ds2411.c
+
+src\timer.c
 
 src\usart_rs485_example_canopus.c
 

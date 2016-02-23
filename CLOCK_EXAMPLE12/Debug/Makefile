@@ -119,8 +119,10 @@ C_SRCS +=  \
 ../src/ASF/sam/utils/cmsis/same70/source/templates/gcc/startup_same70.c \
 ../src/ASF/sam/utils/cmsis/same70/source/templates/system_same70.c \
 ../src/ASF/sam/utils/syscalls/gcc/syscalls.c \
+../src/ec_print_funcs.c \
 ../src/pca9952.c \
 ../src/serial_id_ds2411.c \
+../src/timer.c \
 ../src/usart_rs485_example_canopus.c \
 ../src/main.c
 
@@ -153,8 +155,10 @@ src/ASF/sam/drivers/usart/usart.o \
 src/ASF/sam/utils/cmsis/same70/source/templates/gcc/startup_same70.o \
 src/ASF/sam/utils/cmsis/same70/source/templates/system_same70.o \
 src/ASF/sam/utils/syscalls/gcc/syscalls.o \
+src/ec_print_funcs.o \
 src/pca9952.o \
 src/serial_id_ds2411.o \
+src/timer.o \
 src/usart_rs485_example_canopus.o \
 src/main.o
 
@@ -180,8 +184,10 @@ src/ASF/sam/drivers/usart/usart.o \
 src/ASF/sam/utils/cmsis/same70/source/templates/gcc/startup_same70.o \
 src/ASF/sam/utils/cmsis/same70/source/templates/system_same70.o \
 src/ASF/sam/utils/syscalls/gcc/syscalls.o \
+src/ec_print_funcs.o \
 src/pca9952.o \
 src/serial_id_ds2411.o \
+src/timer.o \
 src/usart_rs485_example_canopus.o \
 src/main.o
 
@@ -207,8 +213,10 @@ src/ASF/sam/drivers/usart/usart.d \
 src/ASF/sam/utils/cmsis/same70/source/templates/gcc/startup_same70.d \
 src/ASF/sam/utils/cmsis/same70/source/templates/system_same70.d \
 src/ASF/sam/utils/syscalls/gcc/syscalls.d \
+src/ec_print_funcs.d \
 src/pca9952.d \
 src/serial_id_ds2411.d \
+src/timer.d \
 src/usart_rs485_example_canopus.d \
 src/main.d
 
@@ -234,8 +242,10 @@ src/ASF/sam/drivers/usart/usart.d \
 src/ASF/sam/utils/cmsis/same70/source/templates/gcc/startup_same70.d \
 src/ASF/sam/utils/cmsis/same70/source/templates/system_same70.d \
 src/ASF/sam/utils/syscalls/gcc/syscalls.d \
+src/ec_print_funcs.d \
 src/pca9952.d \
 src/serial_id_ds2411.d \
+src/timer.d \
 src/usart_rs485_example_canopus.d \
 src/main.d
 
@@ -254,6 +264,10 @@ LINKER_SCRIPT_DEP+=  \
 
 
 # AVR32/GNU C Compiler
+
+
+
+
 
 
 

@@ -134,6 +134,7 @@
 #include "pca9952.h"
 #include "serial_id_ds2411.h"
 #include "afec.h"
+#include "timer.h"
 
 
 /** Size of the receive buffer and transmit buffer. */
@@ -362,6 +363,19 @@ void SysTick_Handler(void)
 	g_ul_tick_count++;
 	ul_ms_ticks++; //jsi 6feb16
 	
+	timerTickCount++;
+	timerTickCount &= MAX_TICK; // force rollover at this count to avoid confusion detecting rollover with the MSbit set
+	if (timerTickCount == 0)
+	{
+		rollover = 1;
+	}
+	
+	if ((timerTickCount % TICKS_PER_SEC) == 0)
+	{
+		process_timers();
+	}
+
+	
 	if (controls.buzzer_enable)
 	{
 		controls.buzzer_count++;
@@ -471,7 +485,7 @@ void USART_Handler(void)
  *  Configure USART in RS485 mode, asynchronous, 8 bits, 1 stop bit,
  *  no parity, 256000 bauds and enable its transmitter and receiver.
  */
-static void configure_usart(void)
+void configure_usart(void)
 {
 	const sam_usart_opt_t usart_console_settings = {
 		BOARD_USART_BAUDRATE,
@@ -509,7 +523,7 @@ static void configure_usart(void)
 /**
  *  Configure system tick to generate an interrupt every 1us. Note that this was 1ms in the example code. jsi 11feb16
  */
-static void configure_systick(void)
+void configure_systick(void)
 {
 	uint32_t ul_flag;
 
@@ -524,7 +538,7 @@ static void configure_systick(void)
 /**
  *  Configure UART for debug message output.
  */
-static void configure_console(void)
+void configure_console(void)
 {
 	const usart_serial_options_t uart_serial_options = {
 		.baudrate = CONF_UART_BAUDRATE,
@@ -586,34 +600,7 @@ static void dump_info(char *p_buf, uint32_t ul_size)
  * BELOW: Carry over from EC GEN I code 31jan16 Modified for EC Gen II
  */
 
-/*
- * Commands for LED display: we can only display the strings provided for by the display
- */
-
-unsigned char CMD_READY[7] =	{0x55, 0xAA, 0x91, 0x00, 0x00, 0x00, 0x00};
-unsigned char CMD_CLEAN[7] =	{0x55, 0xAA, 0x92, 0x00, 0x00, 0x00, 0x00};
-unsigned char CMD_CLEANING[7] = {0x55, 0xAA, 0x93, 0x00, 0x00, 0x00, 0x00};
-unsigned char CMD_DIRTY[7] =	{0x55, 0xAA, 0x94, 0x00, 0x00, 0x00, 0x00};
-unsigned char CMD_ERROR[7] =	{0x55, 0xAA, 0x95, 0x00, 0x00, 0x00, 0x00};
-unsigned char CMD_SHELF1[7] =	{0x55, 0xAA, 0x96, 0x00, 0x00, 0x00, 0x00};
-unsigned char CMD_SHELF2[7] =	{0x55, 0xAA, 0x97, 0x00, 0x00, 0x00, 0x00};
-unsigned char CMD_SHELF3[7] =	{0x55, 0xAA, 0x98, 0x00, 0x00, 0x00, 0x00};
-unsigned char CMD_SHELF4[7] =	{0x55, 0xAA, 0x99, 0x00, 0x00, 0x00, 0x00};
-unsigned char CMD_CLEAR[7] =	{0x55, 0xAA, 0xCE, 0x00, 0x00, 0x00, 0x00}; //experiment 11apr15
 	
-unsigned char* cmdPtrArray[10] = {
-	&CMD_READY[0],
-	&CMD_CLEAN[0],
-	&CMD_CLEANING[0],
-	&CMD_DIRTY[0],
-	&CMD_ERROR[0],
-	&CMD_SHELF1[0],
-	&CMD_SHELF2[0],
-	&CMD_SHELF3[0],
-	&CMD_SHELF4[0],
-	&CMD_CLEAR[0]
-};
-
 enum {
 	IDX_READY,
 	IDX_CLEAN,
@@ -640,18 +627,8 @@ enum {
 	SHELF_ACTIVE
 };
 
-
-void display_text(unsigned char idx);
-void display_text(unsigned char idx)
-{
-	for (int i = 0; i<7; i++)
-	{
-		//jsi 3feb16 doesn't compile but we don't need it yet usart_putchar(DISPLAY_USART, ((unsigned char) ((*(cmdPtrArray[idx]+i)))));
-	}
-}
-
-static void twi_init(void);
-static void twi_init(void)
+void twi_init(void);
+void twi_init(void)
 {
 	twihs_options_t opt;
 
@@ -693,7 +670,7 @@ static void twi_init(void)
 
 uint32_t ul_vol;
 
-volatile bool is_conversion_done = false;
+bool is_conversion_done = false;
 
 /** The conversion data value */
 volatile uint32_t g_ul_value[4] = {0, 0, 0, 0};
@@ -901,402 +878,3 @@ void init_pwm(void)
 
 #  define EXAMPLE_LED_GPIO    LED0_GPIO
 
-int alt_main(void) //6feb16 this version of main has been hacked up for only exactly what we need
-{
-	char		txBuf[11] = {0,0,0,0,0,0,0,0,0,0,0}, rxByte;
-	uint32_t	i;	
-	uint32_t	time_elapsed = 0;
-	uint32_t	ul_i;
-	uint8_t		displayState = 0;
-	uint8_t		charCount = 0;
-	
-	char		printStr[64];
-	
-	unsigned char idFamily, acc, id[6], idcsum; //10feb16 temp serial ID code, make more formal later
-
-	controls.psupply_onn = 1;
-	controls.ledoen = 1;
-	controls.MFP = 0;
-	controls.buzzer_enable	= 1;
-	controls.buzzer_count = 0;
-	controls.buzzer_cycle = CYCLE_OFF;
-	controls.solenoid_enable = 0;
-	controls.solenoid_count = 0;
-	controls.solenoid_cycle = CYCLE_OFF;
-	
-	status.doorsw1 = 0;
-	status.doorsw2 = 0;
-	status.last_doorsw1 = 0;
-	status.last_doorsw2 = 0;
-
-	status.col1 = 0;
-	status.col2 = 0;
-	status.col3 = 0;
-	status.row1 = 0;
-	status.row2 = 0;
-	status.row3 = 0;
-	
-	status.last_col1 = 0;
-	status.last_col2 = 0;
-	status.last_col3 = 0;
-	status.last_row1 = 0;
-	status.last_row2 = 0;
-	status.last_row3 = 0;
-	
-	
-
-
-	/* Initialize the SAM system. */
-	sysclk_init();
-	board_init();
-
-	/* Configure UART for blue scrolling display */
-	configure_console();
-
-	/* Configure USART. */
-	configure_usart();
-
-	/* 1ms tick. */
-	configure_systick();
-
-	init_pwm();
-	
-	/*
-	 * Put into some kind of "init_io()" function at some point
-	 */
-	
-	ioport_set_pin_dir(ECLAVE_SERIAL_ID0, IOPORT_DIR_OUTPUT);
-	ioport_set_pin_level(ECLAVE_SERIAL_ID0, IOPORT_PIN_LEVEL_HIGH);
-	ioport_set_pin_dir(ECLAVE_SERIAL_ID1, IOPORT_DIR_OUTPUT);
-	ioport_set_pin_level(ECLAVE_SERIAL_ID1, IOPORT_PIN_LEVEL_HIGH);
-	ioport_set_pin_dir(ECLAVE_SERIAL_ID2, IOPORT_DIR_OUTPUT);
-	ioport_set_pin_level(ECLAVE_SERIAL_ID2, IOPORT_PIN_LEVEL_HIGH);
-	ioport_set_pin_dir(ECLAVE_SERIAL_ID3, IOPORT_DIR_OUTPUT);
-	ioport_set_pin_level(ECLAVE_SERIAL_ID3, IOPORT_PIN_LEVEL_HIGH);
-	ioport_set_pin_dir(ECLAVE_SERIAL_ID4, IOPORT_DIR_OUTPUT);
-	ioport_set_pin_level(ECLAVE_SERIAL_ID4, IOPORT_PIN_LEVEL_HIGH);
-
-	SetSpeed(1); //1==standard speed, not overdrive 
-	
-	for (int i=0; i<5; i++)
-	{
-		if(!OWTouchReset(i)) //we think a board is present, try to read the serial ID
-		{
-			OWWriteByte(i, 0x33); //Read ID command
-			
-			idFamily = OWReadByte(i);
-			
-			acc = crc8_add(0x00, idFamily);
-			
-			for (int j=0; j<6; j++)
-			{
-				id[j] = OWReadByte(i);
-				acc = crc8_add(acc, id[j]);
-			}
-			
-			idcsum = OWReadByte(i);
-			
-			if (acc != idcsum)
-			{
-				func_transmit("Invalid serial ID checksum.\r\n", strlen("Invalid serial ID checksum.\r\n"));
-			}
-			else
-			{
-				sprintf(printStr,"LED board %d serial ID: %x%x%x%x%x%x\r\n", i, id[0], id[1], id[2], id[3], id[4], id[5]);
-				func_transmit(printStr,strlen(printStr));
-			}
-		}
-		else
-		{
-			func_transmit("no board this slot\r\n", strlen("no board this slot\r\n"));
-			
-		}
-	}
-
-	/*
-	 * End of minimalist serial ID chip stuff
-	 */
-
-	twi_init();
-
-//make this ecII jsi 7feb16	gpio_set_pin_high(ECLAVE_LED_OEn); //make sure outputs are disabled at the chip level
-
-	PCA9952_init();
-
-	init_adc();
-	
-	/*
-	 * Enable transmitter here, and disable receiver first, to avoid receiving
-	 * characters sent by itself. It's necessary for half duplex RS485.
-	 */
-	usart_enable_tx(BOARD_USART);
-	usart_enable_rx(BOARD_USART);
-
-	while (1) {
-
-		/* Test the debug LED */
-		ioport_toggle_pin_level(EXAMPLE_LED_GPIO);
-
-
-		/* Test the debug usart rx and tx */
-		for (i=0; i<70; i++) //7 seconds
-		{
-			mdelay(100);
-			
-			
-			/*
-			 * IO inputs
-			 */
-			status.doorsw1 = ioport_get_pin_level(ECLAVE_DOORSW1);
-			status.doorsw2 = ioport_get_pin_level(ECLAVE_DOORSW2);
-			
-			if ((status.doorsw1 != status.last_doorsw1) ||
-				(status.doorsw2 != status.last_doorsw2))
-			{
-				sprintf(printStr,"doorsw1: %d doorsw2: %d\r\n", status.doorsw1, status.doorsw2);
-				func_transmit(printStr, strlen(printStr));
-				status.last_doorsw1 = status.doorsw1;
-				status.last_doorsw2 = status.doorsw2;	
-			}
-			
-			scan_keypad();
-
-			if ((status.col3 != status.last_col3) ||
-			(status.col2 != status.last_col2) ||
-			(status.col1 != status.last_col1) ||
-			(status.row3 != status.last_row3) ||
-			(status.row2 != status.last_row2) ||
-			(status.row1 != status.last_row1))
-			{
-				sprintf(printStr,"ROW321: %d%d%d COL321 %d%d%d ",
-						status.row3, status.row2, status.row1, status.col3, status.col2, status.col1);
-						
-				switch(status.keypad)
-				{
-					case KEYPAD_SW1:
-						strcat(printStr,"Keypad SW1");
-						break;
-					case KEYPAD_SW2:
-						strcat(printStr,"Keypad SW2");
-						break;
-					case KEYPAD_SW3:
-						strcat(printStr,"Keypad SW3");
-						break;
-					case KEYPAD_SW4:
-						strcat(printStr,"Keypad SW4");
-						break;
-					case KEYPAD_SW5:
-						strcat(printStr,"Keypad SW5");
-						break;
-					case KEYPAD_SW6:
-						strcat(printStr,"Keypad SW6");
-						break;
-				}
-				strcat(printStr,"\r\n");
-						
-				func_transmit(printStr, strlen(printStr));
-				
-				status.last_col1 = status.col1;	
-				status.last_col2 = status.col2;	
-				status.last_col3 = status.col3;
-				status.last_row1 = status.row1;	
-				status.last_row2 = status.row2;	
-				status.last_row3 = status.row3;	
-				
-			}
-		
-			if (usart_is_rx_ready(BOARD_USART)) {
-				usart_read(BOARD_USART, (uint32_t *)&rxByte);
-				func_transmit(&rxByte, 1);
-				
-				switch(rxByte)
-				{
-					case 'P':
-					case 'p':
-						toggle(&controls.psupply_onn);
-						sprintf(printStr,"PSUPPLY_ONn: %d\r\n", controls.psupply_onn);
-						func_transmit(printStr, strlen(printStr));
-						ioport_toggle_pin_level(ECLAVE_PSUPPLY_ONn);
-						break;
-					case 'L':
-					case 'l':
-						toggle(&controls.ledoen);
-						sprintf(printStr,"LEDOEn: %d\r\n", controls.ledoen);
-						func_transmit(printStr, strlen(printStr));
-						ioport_toggle_pin_level(ECLAVE_LED_OEn);
-						
-						if (controls.ledoen == 0)
-						{
-							led_shelf(0, LED_ON);
-							led_shelf(1, LED_ON);
-							led_shelf(2, LED_ON);
-							led_shelf(3, LED_ON);
-						}
-						else
-						{
-							led_shelf(0, LED_OFF);
-							led_shelf(1, LED_OFF);
-							led_shelf(2, LED_OFF);
-							led_shelf(3, LED_OFF);
-						}
-						
-						break;
-					case 'M':
-					case 'm':
-						toggle(&controls.MFP);
-						sprintf(printStr,"MFP: %d\r\n", controls.MFP);
-						func_transmit(printStr, strlen(printStr));
-						ioport_toggle_pin_level(ECLAVE_MFP);
-						break;
-					case 'B':
-					case 'b':
-						toggle(&controls.buzzer_enable);
-						sprintf(printStr,"Buzzer: %d\r\n", controls.buzzer_enable);
-						func_transmit(printStr, strlen(printStr));
-						
-						if (controls.buzzer_enable)
-						{
-							controls.buzzer_count = 0;
-							controls.buzzer_cycle = CYCLE_ON;
-							pwm_channel_enable(PWM0, PIN_PWM_LED0_CHANNEL);
-						}
-						else
-						{
-							pwm_channel_disable(PWM0, PIN_PWM_LED0_CHANNEL);
-						}
-						break;
-					case 'S':
-					case 's':
-						toggle(&controls.solenoid_enable);
-						sprintf(printStr,"Solenoid: %d\r\n", controls.solenoid_enable);
-						func_transmit(printStr, strlen(printStr));
-						
-						if (controls.solenoid_enable)
-						{
-							controls.solenoid_count = 0;
-							controls.solenoid_cycle = CYCLE_ON;
-							ioport_set_pin_level(ECLAVE_SOLENOID, IOPORT_PIN_LEVEL_HIGH);
-						}
-						else
-						{
-							ioport_set_pin_level(ECLAVE_SOLENOID, IOPORT_PIN_LEVEL_LOW);
-						}
-						break;
-					case 'H':
-					case 'h':
-						sprintf(printStr,"HELP MENU\r\n");
-						func_transmit(printStr, strlen(printStr));
-						sprintf(printStr,"P - Toggle PSUPPLY_ONn\r\n");
-						func_transmit(printStr, strlen(printStr));
-						sprintf(printStr,"L - Toggle LEDOEn\r\n");
-						func_transmit(printStr, strlen(printStr));
-						sprintf(printStr,"M - Toggle MFP\r\n");
-						func_transmit(printStr, strlen(printStr));
-						sprintf(printStr,"B - Toggle buzzer\r\n");
-						func_transmit(printStr, strlen(printStr));
-						sprintf(printStr,"S - Toggle solenoid\r\n");
-						func_transmit(printStr, strlen(printStr));
-						sprintf(printStr,"H - This menu\r\n");
-						func_transmit(printStr, strlen(printStr));
-						break;
-				}
-			}
-		}
-
-		/* Test the scrolling blue LED display */
-		for (charCount = 0; charCount < 7; charCount++)
-		{
-			unsigned char temp;
-			temp = (*(cmdPtrArray[displayState]+charCount));
-			putchar(temp);
-		}
-		
-		/* Test the debug port */
-
-		switch (displayState)
-		{
-			case IDX_READY:
-				sprintf(txBuf, "Ready\r\n");
-				break;
-			case IDX_CLEAN:
-				sprintf(txBuf, "Clean\r\n");
-				break;
-			case IDX_CLEANING:
-				sprintf(txBuf, "Cleaning\r\n");
-				break;
-			case IDX_DIRTY:
-				sprintf(txBuf, "Dirty\r\n");
-				break;
-			case IDX_ERROR:
-				sprintf(txBuf, "Error\r\n");
-				break;
-			case IDX_SHELF1:
-				sprintf(txBuf, "Shelf1\r\n");
-				break;
-			case IDX_SHELF2:
-				sprintf(txBuf, "Shelf2\r\n");
-				break;
-			case IDX_SHELF3:
-				sprintf(txBuf, "Shelf3\r\n");
-				break;
-			case IDX_SHELF4:
-				sprintf(txBuf, "Shelf4\r\n");
-				break;
-		}
-		
-		func_transmit(txBuf, strlen(txBuf));
-
-
-		if ((++displayState) > 8)
-		{
-			displayState = 0;
-		}
-		
-		/*
-		 * Read Bluesense lines
-		 */
-		
-		afec_channel_enable(AFEC1, AFEC_CHANNEL_9);
-		afec_start_software_conversion(AFEC1);
-		is_conversion_done = false;
-		while (is_conversion_done == false);
-		g_ul_value[0] = g_afec1_sample_data;
-		afec_channel_disable(AFEC1, AFEC_CHANNEL_9);
-
-		afec_channel_enable(AFEC0, AFEC_CHANNEL_4);
-		afec_start_software_conversion(AFEC0);
-		is_conversion_done = false;
-		while (is_conversion_done == false);
-		g_ul_value[1] = g_afec0_sample_data;
-		afec_channel_disable(AFEC0, AFEC_CHANNEL_4);
-
-		afec_channel_enable(AFEC1, AFEC_CHANNEL_4);
-		afec_start_software_conversion(AFEC1);
-		is_conversion_done = false;
-		while (is_conversion_done == false);
-		g_ul_value[2] = g_afec1_sample_data;
-		afec_channel_disable(AFEC1, AFEC_CHANNEL_4);
-
-		afec_channel_enable(AFEC1, AFEC_CHANNEL_5);
-		afec_start_software_conversion(AFEC1);
-		is_conversion_done = false;
-		while (is_conversion_done == false);
-		g_ul_value[3] = g_afec1_sample_data;
-		afec_channel_disable(AFEC1, AFEC_CHANNEL_5);
-
-		if ((g_ul_value[0] != g_ul_last_value[0]) ||
-			(g_ul_value[1] != g_ul_last_value[1]) ||
-			(g_ul_value[2] != g_ul_last_value[2]) ||
-			(g_ul_value[3] != g_ul_last_value[3]))
-		{
-			sprintf(printStr,"ch0: %x ch1: %x ch2: %x ch3: %x\r\n", g_ul_value[0], g_ul_value[1], g_ul_value[2], g_ul_value[3]);
-			func_transmit(printStr, strlen(printStr));
-			g_ul_last_value[0] = g_ul_value[0];
-			g_ul_last_value[1] = g_ul_value[1];
-			g_ul_last_value[2] = g_ul_value[2];
-			g_ul_last_value[3] = g_ul_value[3];
-		}
-		
-		
-	}//while
-}//main

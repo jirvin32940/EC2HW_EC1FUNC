@@ -83,6 +83,7 @@
 #endif
 
 #include <string.h>
+#include <stdio.h>
 #include "asf.h"
 #include "stdio_serial.h"
 #include "conf_board.h"
@@ -92,9 +93,20 @@
 #include "serial_id_ds2411.h"
 #include "afec.h"
 #include "ec_print_funcs.h" //8apr15 changed from print_funcs.h
+#include "timer.h"
+#include "ctype.h"
+
+#define USART_FAILURE                -1 //!< Failure because of some unspecified reason.
 
 
-
+extern void mdelay(uint32_t ul_dly_ticks);
+extern void udelay(uint32_t ul_dly_ticks);
+extern void configure_console(void);
+extern void configure_usart(void);
+extern void configure_systick(void);
+extern void init_pwm(void);
+extern void twi_init(void);
+extern void init_adc(void);
 
 unsigned char read_usage_struct(unsigned char sel);
 unsigned char test_flash(unsigned char sel);
@@ -178,14 +190,6 @@ unsigned long sanitizeMinutes;
 unsigned long tmpSanitizeMinutes;
 unsigned long displayTimerSeconds;
 unsigned char firstTimeSinceDoorLatched = 0;
-t_cpu_time displayTimer;
-t_cpu_time sanitizeTimer;
-t_cpu_time oneMinuteTimer;
-t_cpu_time cleanTimer;
-t_cpu_time debugTimer;
-t_cpu_time errorDisplayTimer;
-
-t_cpu_time mfpExperimentTimer;
 
 
 enum {
@@ -670,6 +674,10 @@ void check_led_brd_side_lifetimes(void)
 		}	
 	}
 }
+
+extern bool is_conversion_done;
+extern uint32_t g_afec0_sample_data;
+extern uint32_t g_afec1_sample_data;
 
 
 int16_t adc_process_task(unsigned char shelfIdx);
@@ -2167,7 +2175,8 @@ void init_led_board_info(void)
 {
 	unsigned char regionGood[5];
 	unsigned char csum;
-	
+
+#if 0 //no flash stuff for now 23feb16 	
 	for (int i=0; i<5; i++)
 	{
 		regionGood[i] = eval_region(i);
@@ -2241,6 +2250,7 @@ void init_led_board_info(void)
 //skip for now 22feb16			copy_region_to_another_sector(i);
 		}
 	}
+#endif //skip flash stuff for now 23feb16
 }
 
 
@@ -2758,8 +2768,8 @@ int main(void){
 	ioport_set_pin_level(ECLAVE_LED_OEn, IOPORT_PIN_LEVEL_LOW); //...and we are live!
 	ioport_set_pin_level(ECLAVE_PSUPPLY_ONn, IOPORT_PIN_LEVEL_LOW);
 	
-	cpu_set_timeout(EC_ONE_SECOND/2, &debugTimer);
-	cpu_set_timeout((5 * EC_ONE_SECOND), &mfpExperimentTimer); //experiment 31may15
+	start_timer(TMR_DEBUG, ((1*SECONDS)/2));
+
 
 	// Main loop
 	while (true) 
@@ -2803,8 +2813,7 @@ int main(void){
 //13jun15					display_text(IDX_CLEAR);
 //13jun15					cpu_delay_ms(500, EC_CPU_CLOCK_FREQ);
 					display_text(IDX_CLEANING);
-					displayTimerSeconds = cpu_ms_2_cy(8000, EC_CPU_CLOCK_FREQ); //8 seconds per "shelf" display is enough time for the text to scroll twice
-					cpu_set_timeout(displayTimerSeconds, &displayTimer);
+					start_timer(TMR_DISPLAY, (8 * SECONDS));
 				}
 				else if (num_present_shelves() != 0){
 					electroclaveState = STATE_EC_IDLE;
@@ -2845,10 +2854,7 @@ int main(void){
 				
 				
 //16jan16 #if 0 //DEBUG: set this to seconds not minutes so we can debug this logic faster 11may15
-				tmpSanitizeMinutes = cpu_ms_2_cy(1000,EC_CPU_CLOCK_FREQ);
-				tmpSanitizeMinutes *= 60;
-				tmpSanitizeMinutes *= sanitizeMinutes;
-				cpu_set_timeout(tmpSanitizeMinutes, &sanitizeTimer); //16jan16 above calcs broken out to debug why this doesn't actually wind up being 30 minutes
+				start_timer(TMR_SANITIZE, (sanitizeMinutes*MINUTES));
 //16jan16 #endif
 //16jan16 we really want minutes right now				cpu_set_timeout((sanitizeMinutes * cpu_ms_2_cy(1000, EC_CPU_CLOCK_FREQ)), &sanitizeTimer); //DEBUG take this out when done debugging logic, put it back to minutes 11may15
 				
@@ -2860,8 +2866,7 @@ int main(void){
 
 				
 //DEBUG 11may15 do this once per second for debug				cpu_set_timeout((60 * cpu_ms_2_cy(1000,EC_CPU_CLOCK_FREQ)), &oneMinuteTimer); //one minute for the usage statistics
-				cpu_set_timeout((cpu_ms_2_cy(1000,EC_CPU_CLOCK_FREQ)), &oneMinuteTimer); //one minute for the usage statistics DEBUG 11may15
-
+				start_timer(TMR_ONE_MINUTE, (1*SECONDS)); //once per second for debug
 				electroclaveState = STATE_SANITIZE;
 				
 				break;
@@ -2870,9 +2875,9 @@ int main(void){
 				/*
     			 * Manage the display
 				 */
-				if (cpu_is_timeout(&displayTimer))
+				if (timer_done(TMR_DISPLAY))
 				{
-					cpu_stop_timeout(&displayTimer);
+					end_timer(TMR_DISPLAY);
 					switch (displayIdx)
 					{
 						case 0:
@@ -2907,7 +2912,7 @@ int main(void){
 						
 					}
 
-					cpu_set_timeout(displayTimerSeconds, &displayTimer); //8 seconds per shelf
+					start_timer(TMR_DISPLAY, displayTimerSeconds * SECONDS);
 
 					//NOTE we need to be careful here, we need to be able to shut off the shelf LEDs the *instant* the door latch opens, this is important for safety
 					//this means we need as little logic between turning the shelf on and turning it off so we can react as quickly as possible to the door latch
@@ -2916,25 +2921,25 @@ int main(void){
 				/*
     			 * Manage storing usage statistics to flash
 				 */
-				if (cpu_is_timeout (&oneMinuteTimer))
+				if (timer_done(TMR_ONE_MINUTE))
 				{
-					cpu_stop_timeout (&oneMinuteTimer);
+					end_timer(TMR_ONE_MINUTE);
 					
 					increment_ledBoard_usage_min(); //increments usage minutes for active shelves only
 					
 //DEBUG 11may15 set to one second for debug					cpu_set_timeout(cpu_ms_2_cy(60000, EC_CPU_CLOCK_FREQ), &oneMinuteTimer); //one minute for the usage statistics
-					cpu_set_timeout((cpu_ms_2_cy(1000,EC_CPU_CLOCK_FREQ)), &oneMinuteTimer); //one minute for the usage statistics DEBUG 11may15 one second instead of one minute
+					start_timer(TMR_ONE_MINUTE, (1 * SECONDS));
 				}
 				/*
     			 * Manage the sanitizer timer
 				 */
-				if (cpu_is_timeout(&sanitizeTimer)) {
+				if (timer_done(TMR_SANITIZE)) {
 					
 					for (int i=0; i< NUM_SHELVES; i++)
 					{
 //DEBUG 16jan16 THIS IS REALLY SLOPPY, WANT TO KEEP THE LEDS ON FOR 30 MINUTES BUT THE TIMER STUFF DOESN'T SEEM TO WORK THAT LONG, SO WE ARE JUST NOT GOING TO TURN THE SHELVES OFF						led_shelf(i, LED_OFF); //turn off every shelf. (doesn't hurt to make sure that even non-active shelves are off.)
 					}
-					cpu_stop_timeout(&sanitizeTimer);
+					end_timer(TMR_SANITIZE);
 					print_ecdbg("Shelf clean\r\n");
 					electroclaveState = STATE_START_CLEAN;
 				}
@@ -2949,12 +2954,12 @@ int main(void){
 //DEBUG 24jun15 change to 60 seconds for demo, put this line back in later				cpu_set_timeout((20 * cpu_ms_2_cy(1000, EC_CPU_CLOCK_FREQ)), &cleanTimer); //DEBUG 11may15 
 
 //				cpu_set_timeout((60 * cpu_ms_2_cy(1000, EC_CPU_CLOCK_FREQ)), &cleanTimer); //DEBUG 24jun15 change to 60 seconds for demo, remove later
-				cpu_set_timeout((3 * cpu_ms_2_cy(1000, EC_CPU_CLOCK_FREQ)), &cleanTimer); //DEBUG 31jul15 change to 3 seconds BOTDRIVE, remove later
+				start_timer(TMR_CLEAN, (3 * SECONDS));
 				break;	
 				
 			case STATE_CLEAN:
-				if (cpu_is_timeout(&cleanTimer)) {
-					cpu_stop_timeout(&cleanTimer);
+				if (timer_done(TMR_CLEAN)) {
+					end_timer(TMR_CLEAN);
 					electroclaveState = STATE_VALID_KEYPAD_CODE;	
 				}
 				break;
@@ -2968,9 +2973,9 @@ int main(void){
 				}
 				
 				
-				if (cpu_is_timeout(&errorDisplayTimer))
+				if (timer_done(TMR_ERROR_DISPLAY))
 				{
-					cpu_stop_timeout(&errorDisplayTimer);
+					end_timer(TMR_ERROR_DISPLAY);
 
 					while(1)
 					{
@@ -2979,7 +2984,7 @@ int main(void){
 							case 0:
 								display_text(IDX_ERROR);
 								displayChanged = 1;
-								cpu_set_timeout(8*EC_ONE_SECOND, &errorDisplayTimer);
+								start_timer(TMR_ERROR_DISPLAY, (8 * SECONDS));
 								errorDisplayState = 1;
 								break;
 							case 1:
@@ -2989,7 +2994,7 @@ int main(void){
 								{
 									display_text(IDX_SHELF1);
 									displayChanged = 1;
-									cpu_set_timeout(8*EC_ONE_SECOND, &errorDisplayTimer);
+									start_timer(TMR_ERROR_DISPLAY, (8 * SECONDS));
 								}
 								errorDisplayState = 2;
 								break;
@@ -3000,7 +3005,7 @@ int main(void){
 								{
 									display_text(IDX_SHELF2);
 									displayChanged = 1;
-									cpu_set_timeout(8*EC_ONE_SECOND, &errorDisplayTimer);
+									start_timer(TMR_ERROR_DISPLAY, (8 * SECONDS));
 								}
 								errorDisplayState = 3;
 								break;
@@ -3011,7 +3016,7 @@ int main(void){
 								{
 									display_text(IDX_SHELF3);
 									displayChanged = 1;
-									cpu_set_timeout(8*EC_ONE_SECOND, &errorDisplayTimer);
+									start_timer(TMR_ERROR_DISPLAY, (8 * SECONDS));
 								}
 								errorDisplayState = 4;
 								break;
@@ -3022,7 +3027,7 @@ int main(void){
 								{
 									display_text(IDX_SHELF4);
 									displayChanged = 1;
-									cpu_set_timeout(8*EC_ONE_SECOND, &errorDisplayTimer);
+									start_timer(TMR_ERROR_DISPLAY, (8 * SECONDS));
 								}
 								errorDisplayState = 0;
 								break;
@@ -3039,7 +3044,7 @@ int main(void){
 						
 					} //while(1)
 
-				} //if (cpu_is_timeout(&errorDisplayTimer))
+				} //if (timer_done(TMR_ERROR_DISPLAY))
 				break;
 				
 			case STATE_SHUTDOWN_PROCESSES:
@@ -3096,10 +3101,10 @@ int main(void){
 			}
 		} //if (!EC_DOOR_LATCHED)
 		
-		if (cpu_is_timeout(&debugTimer))
+		if (timer_done(TMR_DEBUG))
 		{
-			cpu_stop_timeout(&debugTimer);
-			cpu_set_timeout((EC_ONE_SECOND/2), &debugTimer);
+			end_timer(TMR_DEBUG);
+			start_timer(TMR_DEBUG, ((1 * SECONDS)/2));
 			ioport_toggle_pin_level(EXAMPLE_LED_GPIO);
 		}
 		

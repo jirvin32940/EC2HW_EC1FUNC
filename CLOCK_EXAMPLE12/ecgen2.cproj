@@ -1060,6 +1060,12 @@
     <Compile Include="src\serial_id_ds2411.h">
       <SubType>compile</SubType>
     </Compile>
+    <Compile Include="src\timer.c">
+      <SubType>compile</SubType>
+    </Compile>
+    <Compile Include="src\timer.h">
+      <SubType>compile</SubType>
+    </Compile>
     <Compile Include="src\usart_rs485_example_canopus.c">
       <SubType>compile</SubType>
     </Compile>
