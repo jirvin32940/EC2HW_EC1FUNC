@@ -12,6 +12,8 @@
 #ifndef TIMER_H
 #define TIMER_H
 
+#include "asf.h"
+
 #define MAX_TICK (0x3FFFFFFFL)
 
 #define HOURS			(60*MINUTES)
@@ -55,6 +57,19 @@ typedef struct
 extern TIMER timers[NUM_TIMERS];
 extern unsigned char rollover;
 
+typedef struct CONTROLS{
+
+	uint8_t		psupply_onn;
+	uint8_t		ledoen;
+	uint8_t		MFP;
+	uint8_t		buzzer_enable;
+	uint8_t		buzzer_cycle;
+	uint16_t	buzzer_count;
+	uint8_t		solenoid_enable;
+	uint8_t		solenoid_cycle;
+	uint16_t	solenoid_count;
+
+};
 
 
 void init_timer_vars(void);

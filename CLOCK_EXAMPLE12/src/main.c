@@ -95,7 +95,7 @@
 #include "ec_print_funcs.h" //8apr15 changed from print_funcs.h
 #include "timer.h"
 #include "ctype.h"
-
+#include "arm_math.h"
 #define USART_FAILURE                -1 //!< Failure because of some unspecified reason.
 
 
@@ -119,7 +119,7 @@ void write_usage_to_flash(unsigned char sel);
 
 void load_usage_indeces(void);
 
-
+extern struct CONTROLS controls;
 
 unsigned char minute_count(unsigned char * pMinuteBits);
 void reset_minutes(unsigned char * pMinuteBits);
@@ -461,7 +461,7 @@ volatile U16 adc_current_conversion;
 
 uint8_t validKeypadCode = 0; //replaces ECLAVE_ACTION_PB from EC1
 
-#define EC_DOOR_LATCHED (ioport_get_pin_level(ECLAVE_DOORSW1) && ioport_get_pin_level(ECLAVE_DOORSW2))
+#define EC_DOOR_LATCHED ((!ioport_get_pin_level(ECLAVE_DOORSW1)) && (!ioport_get_pin_level(ECLAVE_DOORSW2)))
 
 
 enum {
@@ -620,7 +620,8 @@ unsigned char check_led_brd_side_lifetime(unsigned char sideIdx)
 {
 	unsigned char idx;
 	unsigned int hours;
-	float intensity;
+	float32_t intensity = 0;
+	float32_t tmpSanMinutes = 0;
 	
 	/*
 	 * Find the record for this board's serial ID number, and check the usage hours and see if we
@@ -638,10 +639,22 @@ unsigned char check_led_brd_side_lifetime(unsigned char sideIdx)
 /*
  * Since we have to calculate the hours to see if the shelf is valid, finish out the calculations for the sanitizing time also. We'll need it later.
  */
-	intensity = ((0.00002 * hours * hours) - (0.0699 * hours) + 91.879);
-		
-	ledBrdSide[sideIdx].sanitizeMinutes = (c.initialDTE * 100)/intensity; //Shortest sanitize time is 20 minutes. Sanitize time increases as LED intensity drops with usage. Sanitize time is around 49 minutes when usage is at 2000 hours.
+//	intensity = ((0.00002 * hours * hours) - (0.0699 * hours) + 91.879);
+#if 0 //debug 23feb16 this makes the board hang???
+	intensity = 0.00002;
+	intensity *= hours;
+	intensity *= hours;
+	intensity -= (0.0699 * hours);
+	intensity += 91.879;
 	
+	tmpSanMinutes = c.initialDTE;
+	tmpSanMinutes *= 100;
+	tmpSanMinutes /= intensity;
+	
+	ledBrdSide[sideIdx].sanitizeMinutes = (unsigned char) tmpSanMinutes; //Shortest sanitize time is 20 minutes. Sanitize time increases as LED intensity drops with usage. Sanitize time is around 49 minutes when usage is at 2000 hours.
+
+#endif 0 //debug 23feb16 this makes the board hang???	
+
 //	ledBrdSide[sideIdx].sanitizeMinutes = 60; //DEBUG hard code to 1 minute per Christian 24jun15 take this out later
 //	ledBrdSide[sideIdx].sanitizeMinutes = 255; //DEBUG hard code to 10 minutes to debug BOTDRIVE problem 31jul15 take this out later
 	ledBrdSide[sideIdx].sanitizeMinutes = 30; //DEBUG hard code to 30 minutes for sanitation tests 16jan16
@@ -772,7 +785,7 @@ unsigned char check_shelf_for_devices(unsigned char shelfPosition)
 		print_ecdbg(str);
 	}
 
-	if ((bluesenseAvg < 0x300) ||  (bluesenseAvg & 0x8000))//full range for 12 bit number is 0xFFF, but this number is 2's complement meaning it can (and it does) go negative
+	if ((bluesenseAvg < 0xC00) ||  (bluesenseAvg & 0x8000))//full range for 12 bit number is 0xFFF, but this number is 2's complement meaning it can (and it does) go negative
 	{
 		return DEVICES_PRESENT;
 	}
@@ -2176,7 +2189,7 @@ void init_led_board_info(void)
 	unsigned char regionGood[5];
 	unsigned char csum;
 
-#if 0 //no flash stuff for now 23feb16 	
+#if 0 //23feb16 force this flash region eval to be bad, we want the defaults loaded in the structures, put this back in later
 	for (int i=0; i<5; i++)
 	{
 		regionGood[i] = eval_region(i);
@@ -2219,6 +2232,7 @@ void init_led_board_info(void)
 	}
 	else
 	{
+#endif //23feb16 force this flash region eval to be bad, we want the defaults loaded in the structures, put this back in later
 		memset(&sf, 0x00, sizeof(sf));		//serial id's and flags
 		memset(&sanc, 0x00, sizeof(sanc));	//total chassis sanitation cycles
 		memset(&h, 0x00, sizeof(h));		//usage hours
@@ -2249,8 +2263,9 @@ void init_led_board_info(void)
 //skip for now 22feb16			write_region_to_flash(i,  0xFF, csum);
 //skip for now 22feb16			copy_region_to_another_sector(i);
 		}
-	}
-#endif //skip flash stuff for now 23feb16
+#if 0 //23feb16 force this flash region eval to be bad, we want the defaults loaded in the structures, put this back in later
+	} //if-else
+#endif //23feb16 force this flash region eval to be bad, we want the defaults loaded in the structures, put this back in later	
 }
 
 
@@ -2259,7 +2274,7 @@ void show_sw_version(void)
 {
 	print_ecdbg("\r\n*---------------------------------------------------*\r\n");
 	print_ecdbg(    "ELECTROCLAVE\r\nCopyright (c) 2016 Seal Shield, Inc. \r\n");
-	print_ecdbg(    "Hardware Version: Classic +++ Software Version: 0.077\r\n");
+	print_ecdbg(    "Hardware Version: Classic +++ Software Version: 0.078\r\n");
 
 }
 
@@ -2612,7 +2627,7 @@ void service_ecdbg_input(void)
 
 	cmd[cmdIdx++] = rx_char;
 	
-	putchar(rx_char);
+	print_ecdbg(rx_char);
 	if (rx_char == '\r')
 	{ 
 		if (cmdIdx == 2)
@@ -2644,6 +2659,11 @@ void service_ecdbg_input(void)
 					show_chassis_sysErr();
 					show_chassis_all_LED_boards();
 					show_help_and_prompt();
+					break;
+				case 'K':
+				case 'k':
+					print_ecdbg("Valid Keypad Code\r\n");
+					validKeypadCode = 1;
 					break;
 			}
 		}
@@ -2714,38 +2734,28 @@ int main(void){
 
 	init_io();
 	
+	/* 1ms tick. */
+	configure_systick();
+
 	/* Configure UART for blue scrolling display */
 	configure_console();
 
 	/* Configure USART. */
 	configure_usart();
 
-	/* 1ms tick. */
-	configure_systick();
-
-	init_pwm();
-	
 	init_sysErr();
 	
 	init_shelf_n_ledBrd_structs();
 	read_led_board_serial_ids();
 		
-	twi_init();
-
 //make this ecII jsi 7feb16	gpio_set_pin_high(ECLAVE_LED_OEn); //make sure outputs are disabled at the chip level
 
-	PCA9952_init();
-
-	init_adc();
-	
 	/*
 	 * Enable transmitter here, and disable receiver first, to avoid receiving
 	 * characters sent by itself. It's necessary for half duplex RS485.
 	 */
 	usart_enable_tx(BOARD_USART);
 	usart_enable_rx(BOARD_USART);
-
-
 
 	show_sw_version();
 
@@ -2754,11 +2764,13 @@ int main(void){
 	
 	ioport_set_pin_level(ECLAVE_LED_OEn, IOPORT_PIN_LEVEL_HIGH); //make sure outputs are disabled at the chip level
 
-	PCA9952_init();
-	test_led_driver_channels();
-	
 	
 	init_led_board_info();
+
+	twi_init();
+	PCA9952_init();
+	test_led_driver_channels();
+
 
 	show_chassis_status_info();
 	show_chassis_sysErr();
@@ -2767,7 +2779,15 @@ int main(void){
 	
 	ioport_set_pin_level(ECLAVE_LED_OEn, IOPORT_PIN_LEVEL_LOW); //...and we are live!
 	ioport_set_pin_level(ECLAVE_PSUPPLY_ONn, IOPORT_PIN_LEVEL_LOW);
+
+
+	init_pwm();
 	
+	init_adc();
+	
+	controls.buzzer_enable = 0;
+	pwm_channel_disable(PWM0, PIN_PWM_LED0_CHANNEL); //for the love of christ turn this off
+
 	start_timer(TMR_DEBUG, ((1*SECONDS)/2));
 
 
@@ -2778,6 +2798,8 @@ int main(void){
 		{
 			case STATE_EC_IDLE:
 				if (EC_DOOR_LATCHED) {
+					controls.buzzer_enable = 0;
+					pwm_channel_disable(PWM0, PIN_PWM_LED0_CHANNEL);
 					ioport_set_pin_level(EXAMPLE_LED_GPIO, IOPORT_PIN_LEVEL_LOW);
 					print_ecdbg("Door latch detected\r\n");
 					firstTimeSinceDoorLatched = 1;
@@ -2790,6 +2812,7 @@ int main(void){
 				
 			case STATE_DOOR_LATCHED:
 				if (validKeypadCode) {
+					controls.solenoid_enable = 1;
 					print_ecdbg("Valid keypad code detected\r\n");
 					electroclaveState = STATE_VALID_KEYPAD_CODE;
 					validKeypadCode = 0; //reset
@@ -3062,7 +3085,9 @@ int main(void){
 		 * shut down all processes for safety
 		 */
 		if (!EC_DOOR_LATCHED) {
-		
+			
+			controls.buzzer_enable = 1;
+
 			if (firstDoorOpenSinceIdle)
 			{
 				door_latch_open_kill_all_shelves();

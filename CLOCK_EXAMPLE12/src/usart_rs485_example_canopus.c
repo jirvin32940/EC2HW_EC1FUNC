@@ -233,19 +233,8 @@ void mdelay(uint32_t ul_dly_ticks)
 #define CYCLE_ON			1		
 #define CYCLE_OFF			0
 
-struct {
 
-	uint8_t		psupply_onn;
-	uint8_t		ledoen;
-	uint8_t		MFP;
-	uint8_t		buzzer_enable;
-	uint8_t		buzzer_cycle;
-	uint16_t	buzzer_count; 
-	uint8_t		solenoid_enable;
-	uint8_t		solenoid_cycle;
-	uint16_t	solenoid_count; 
-
-}controls;
+struct CONTROLS controls;
 
 struct {
 
