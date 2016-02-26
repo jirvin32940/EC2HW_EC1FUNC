@@ -188,14 +188,15 @@ LEDBRDSIDE ledBrdSide[NUM_LED_BOARD_SIDES];
 
 unsigned long sanitizeMinutes;
 unsigned long tmpSanitizeMinutes;
-unsigned long displayTimerSeconds;
+unsigned long displayTimerSeconds = 8;
 unsigned char firstTimeSinceDoorLatched = 0;
 
 
 enum {
 	STATE_EC_IDLE,
+	STATE_DOOR_OPEN,
+	STATE_DOOR_AJAR,
 	STATE_DOOR_LATCHED,
-	STATE_VALID_KEYPAD_CODE,
 	STATE_START_SANITIZE,
 	STATE_SANITIZE,
 	STATE_START_CLEAN,
@@ -203,6 +204,166 @@ enum {
 	STATE_CHASSIS_ERROR,
 	STATE_SHUTDOWN_PROCESSES
 };
+
+
+/*
+ * process_kbp() states
+ */
+
+enum {
+	
+	KPB_START,
+	KPB_DIG1,
+	KPB_DIG2,
+	KPB_DIG3,
+	KPB_DIG4	
+};
+
+/*
+ * process_kpb() returns
+ */
+enum {
+	
+	KPB_CONTINUE,
+	KPB_VALID,
+	KPB_ERROR
+};
+
+
+/*
+ * Bits packed ROW3, 2, 1, COL2, 1.
+ * For example, if ROW3..1 is 0b111 and COL2..1 is 0b01 the packed bits are 0x1D and we recognize that as SW1
+ */
+
+#define KEYPAD_START	0x1D
+#define KEYPAD_SW1		0x15
+#define KEYPAD_SW2		0x19
+#define KEYPAD_SW3		0x0E
+#define KEYPAD_SW4		0x16
+#define KEYPAD_SW5		0x1A
+
+uint8_t scan_keypad(void)
+{
+	uint8_t tempKeypad, retKPB, col1, col2, col3, row1, row2, row3;
+	
+	ioport_set_pin_dir(ECLAVE_COL3, IOPORT_DIR_OUTPUT);
+	ioport_set_pin_dir(ECLAVE_COL2, IOPORT_DIR_OUTPUT);
+	ioport_set_pin_dir(ECLAVE_COL1, IOPORT_DIR_OUTPUT);
+
+	ioport_set_pin_dir(ECLAVE_ROW3, IOPORT_DIR_INPUT);
+	ioport_set_pin_dir(ECLAVE_ROW2, IOPORT_DIR_INPUT);
+	ioport_set_pin_dir(ECLAVE_ROW1, IOPORT_DIR_INPUT);
+	
+	ioport_set_pin_level(ECLAVE_COL3, IOPORT_PIN_LEVEL_LOW);
+	ioport_set_pin_level(ECLAVE_COL2, IOPORT_PIN_LEVEL_LOW);
+	ioport_set_pin_level(ECLAVE_COL1, IOPORT_PIN_LEVEL_LOW);
+
+	row3 = ioport_get_pin_level(ECLAVE_ROW3);
+	row2 = ioport_get_pin_level(ECLAVE_ROW2);
+	row1 = ioport_get_pin_level(ECLAVE_ROW1);
+
+
+	ioport_set_pin_dir(ECLAVE_ROW3, IOPORT_DIR_OUTPUT);
+	ioport_set_pin_dir(ECLAVE_ROW2, IOPORT_DIR_OUTPUT);
+	ioport_set_pin_dir(ECLAVE_ROW1, IOPORT_DIR_OUTPUT);
+
+	ioport_set_pin_dir(ECLAVE_COL3, IOPORT_DIR_INPUT);
+	ioport_set_pin_dir(ECLAVE_COL2, IOPORT_DIR_INPUT);
+	ioport_set_pin_dir(ECLAVE_COL1, IOPORT_DIR_INPUT);
+	
+	ioport_set_pin_level(ECLAVE_ROW3, IOPORT_PIN_LEVEL_LOW);
+	ioport_set_pin_level(ECLAVE_ROW2, IOPORT_PIN_LEVEL_LOW);
+	ioport_set_pin_level(ECLAVE_ROW1, IOPORT_PIN_LEVEL_LOW);
+
+	col3 = ioport_get_pin_level(ECLAVE_COL3);
+	col2 = ioport_get_pin_level(ECLAVE_COL2);
+	col1 = ioport_get_pin_level(ECLAVE_COL1);
+	
+	tempKeypad = ((row3 << 4) |
+					(row2 << 3) |
+					(row1 << 2) |
+					(col2 << 1) |
+					(col1));
+					
+	switch (tempKeypad)
+	{
+		case KEYPAD_START:
+		case KEYPAD_SW1:
+		case KEYPAD_SW2:
+		case KEYPAD_SW3:
+		case KEYPAD_SW4:
+		case KEYPAD_SW5:
+			retKPB = tempKeypad; //only report valid decodings
+			break;
+		default:
+			retKPB = 0;
+			break; 
+		
+	}
+	
+	return retKPB;
+}
+
+
+uint8_t kpbState = KPB_START;
+
+uint8_t kpbValidCodes[4] = {KEYPAD_SW1, KEYPAD_SW2, KEYPAD_SW3, KEYPAD_SW4}; //just one valid code for now
+
+uint8_t process_kpb(void)
+{
+	uint8_t kpb;
+	
+	if (kpbState > KPB_START)
+	{
+		if (timer_done(TMR_KEYPAD))
+		{
+			end_timer(TMR_KEYPAD); //make sure everything is reset for this timer
+			kpbState = KPB_START;
+			return KPB_ERROR;
+		}
+	}
+	
+	if ((kpb = scan_keypad()) != 0)
+	{
+		switch(kpbState)
+		{
+			case KPB_START:
+				if (kpbValidCodes[0] == kpb)
+				{
+					start_timer(TMR_KEYPAD, (2 * SECONDS));
+					kpbState = KPB_DIG1;
+					return KPB_CONTINUE;
+				}
+				break;
+			case KPB_DIG1:
+				if (kpbValidCodes[1] == kpb)
+				{
+					kpbState = KPB_DIG2;
+					return KPB_CONTINUE;
+				}
+				break;
+			case KPB_DIG2:
+				if (kpbValidCodes[2] == kpb)
+				{
+					kpbState = KPB_DIG3;
+					return KPB_CONTINUE;
+				}
+				break;
+			case KPB_DIG3:
+				if (kpbValidCodes[3] == kpb)
+				{
+					kpbState = KPB_START;
+					return KPB_VALID;
+				}
+				break;
+		}
+		
+		kpbState = KPB_START;
+		return KPB_ERROR; //if we got here, we had a code but it didn't match what was in the list of valid codes
+	}
+	
+	return KPB_CONTINUE; //if we are here, nothing happened or we are in the middle of debounce
+}
 
 
 
@@ -459,7 +620,8 @@ enum {
 
 volatile U16 adc_current_conversion;
 
-uint8_t validKeypadCode = 0; //replaces ECLAVE_ACTION_PB from EC1
+uint8_t validKeypadCode = 0;
+uint8_t startButtonPressed = 0;
 
 #define EC_DOOR_LATCHED ((!ioport_get_pin_level(ECLAVE_DOORSW1)) && (!ioport_get_pin_level(ECLAVE_DOORSW2)))
 
@@ -657,7 +819,8 @@ unsigned char check_led_brd_side_lifetime(unsigned char sideIdx)
 
 //	ledBrdSide[sideIdx].sanitizeMinutes = 60; //DEBUG hard code to 1 minute per Christian 24jun15 take this out later
 //	ledBrdSide[sideIdx].sanitizeMinutes = 255; //DEBUG hard code to 10 minutes to debug BOTDRIVE problem 31jul15 take this out later
-	ledBrdSide[sideIdx].sanitizeMinutes = 30; //DEBUG hard code to 30 minutes for sanitation tests 16jan16
+//	ledBrdSide[sideIdx].sanitizeMinutes = 30; //DEBUG hard code to 30 minutes for sanitation tests 16jan16
+	ledBrdSide[sideIdx].sanitizeMinutes = 1; //DEBUG hard code to 1 minute for trade show 25feb16
 
 
 	if (hours < 2001)
@@ -2627,7 +2790,7 @@ void service_ecdbg_input(void)
 
 	cmd[cmdIdx++] = rx_char;
 	
-	print_ecdbg(rx_char);
+	print_ecdbg(&rx_char);
 	if (rx_char == '\r')
 	{ 
 		if (cmdIdx == 2)
@@ -2664,6 +2827,11 @@ void service_ecdbg_input(void)
 				case 'k':
 					print_ecdbg("Valid Keypad Code\r\n");
 					validKeypadCode = 1;
+					break;
+				case 'T':
+				case 't':
+					print_ecdbg("Start button pressed\r\n");
+					startButtonPressed = 1;
 					break;
 			}
 		}
@@ -2727,6 +2895,7 @@ void service_ecdbg_input(void)
 int main(void){
 	static unsigned char displayIdx = 0;
 	char mainStr[80];
+	uint8_t kpbResult;
 	
 	/* Initialize the SAM system. */
 	sysclk_init();
@@ -2797,6 +2966,7 @@ int main(void){
 		switch(electroclaveState)
 		{
 			case STATE_EC_IDLE:
+#if 0 //EC1 25feb16			
 				if (EC_DOOR_LATCHED) {
 					controls.buzzer_enable = 0;
 					pwm_channel_disable(PWM0, PIN_PWM_LED0_CHANNEL);
@@ -2808,44 +2978,83 @@ int main(void){
 					electroclaveState = STATE_DOOR_LATCHED;
 					firstDoorOpenSinceIdle = 1;
 				}
+#endif //EC1 25feb16
+				if ((kpbResult = process_kpb()) == KPB_VALID)
+//jsi debug 25feb16 temporarily leave this out to debug the rest of the state machine				if (validKeypadCode)
+				{
+					controls.solenoid_enable = true;
+					start_timer(TMR_DOOR_OPEN, (15 * SECONDS)); //TODO: change to 2 minutes for real product
+					electroclaveState = STATE_DOOR_OPEN;
+					print_ecdbg("STATE_DOOR_OPEN\r\n");
+					validKeypadCode = 0; //jsi 25feb16 debug
+					firstTimeSinceDoorLatched = 1;
+				}
 				break;
 				
+			case STATE_DOOR_OPEN:
+				if (timer_done(TMR_DOOR_OPEN))
+				{
+					controls.buzzer_enable = true;
+					electroclaveState = STATE_DOOR_AJAR;
+					print_ecdbg("STATE_DOOR_AJAR\r\n");
+
+				}
+				if (((kpbResult = scan_keypad()) == KEYPAD_START) && EC_DOOR_LATCHED)
+//jsi 25feb16 debug				if (startButtonPressed)
+				{
+					end_timer(TMR_DOOR_OPEN);
+					electroclaveState = STATE_DOOR_LATCHED;
+					print_ecdbg("STATE_DOOR_LATCHED\r\n");
+					startButtonPressed = 0; //jsi 25feb16 debug
+				}
+				break;
+			
+			case STATE_DOOR_AJAR:
+				if (EC_DOOR_LATCHED)
+				{
+					controls.buzzer_enable = false;
+					pwm_channel_disable(PWM0, PIN_PWM_LED0_CHANNEL);
+					electroclaveState = STATE_EC_IDLE;
+					print_ecdbg("STATE_EC_IDLE\r\n");
+				}
+				break;				
+				
 			case STATE_DOOR_LATCHED:
+#if 0 //EC1 25feb16
 				if (validKeypadCode) {
 					controls.solenoid_enable = 1;
 					print_ecdbg("Valid keypad code detected\r\n");
 					electroclaveState = STATE_VALID_KEYPAD_CODE;
 					validKeypadCode = 0; //reset
 				}
-				break;
-				
-			case STATE_VALID_KEYPAD_CODE:
-
+#endif //EC1 25feb16
 				if (firstTimeSinceDoorLatched)
 				{
 					check_led_brd_side_lifetimes();
 					check_shelves_for_devices();
 					set_shelves_active_inactive();
-					
+				
 					firstTimeSinceDoorLatched = 0;
 				}
 
 				if (num_active_shelves() != 0) {
 					electroclaveState = STATE_START_SANITIZE;
+					print_ecdbg("STATE_START_SANITIZE\r\n");
 					print_ecdbg("Sanitizing\r\n");
-//13jun15					display_text(IDX_CLEAR);
-//13jun15					cpu_delay_ms(500, EC_CPU_CLOCK_FREQ);
+					//13jun15					display_text(IDX_CLEAR);
+					//13jun15					cpu_delay_ms(500, EC_CPU_CLOCK_FREQ);
 					display_text(IDX_CLEANING);
 					start_timer(TMR_DISPLAY, (8 * SECONDS));
 				}
 				else if (num_present_shelves() != 0){
 					electroclaveState = STATE_EC_IDLE;
+					print_ecdbg("STATE_EC_IDLE\r\n");
 					print_ecdbg("At least one shelf is present, but no devices to be cleaned.\r\n");
 					display_text(IDX_READY);
 				}
 				else
 				{
-//DEBUG 24jun15 need to function even with these errors for demo purposes					electroclaveState = STATE_CHASSIS_ERROR;
+					//DEBUG 24jun15 need to function even with these errors for demo purposes					electroclaveState = STATE_CHASSIS_ERROR;
 					print_ecdbg("No shelves, or shelves are past lifetime\r\n");
 					display_text(IDX_ERROR);
 				}
@@ -2891,7 +3100,8 @@ int main(void){
 //DEBUG 11may15 do this once per second for debug				cpu_set_timeout((60 * cpu_ms_2_cy(1000,EC_CPU_CLOCK_FREQ)), &oneMinuteTimer); //one minute for the usage statistics
 				start_timer(TMR_ONE_MINUTE, (1*SECONDS)); //once per second for debug
 				electroclaveState = STATE_SANITIZE;
-				
+				print_ecdbg("STATE_SANITIZE\r\n");
+
 				break;
 				
 			case STATE_SANITIZE:
@@ -2960,30 +3170,33 @@ int main(void){
 					
 					for (int i=0; i< NUM_SHELVES; i++)
 					{
-//DEBUG 16jan16 THIS IS REALLY SLOPPY, WANT TO KEEP THE LEDS ON FOR 30 MINUTES BUT THE TIMER STUFF DOESN'T SEEM TO WORK THAT LONG, SO WE ARE JUST NOT GOING TO TURN THE SHELVES OFF						led_shelf(i, LED_OFF); //turn off every shelf. (doesn't hurt to make sure that even non-active shelves are off.)
+						led_shelf(i, LED_OFF); //turn off every shelf. (doesn't hurt to make sure that even non-active shelves are off.)
 					}
 					end_timer(TMR_SANITIZE);
 					print_ecdbg("Shelf clean\r\n");
 					electroclaveState = STATE_START_CLEAN;
+					print_ecdbg("STATE_START_CLEAN\r\n");
 				}
 				break;
 				
 			case STATE_START_CLEAN:
 				display_text(IDX_CLEAN);
 				electroclaveState = STATE_CLEAN;
+				print_ecdbg("STATE_CLEAN\r\n");
 #if 0 //DEBUG do this in seconds to debug logic 11may15				
 				cpu_set_timeout((20 * 60 * cpu_ms_2_cy(1000, EC_CPU_CLOCK_FREQ)), &cleanTimer);
 #endif
 //DEBUG 24jun15 change to 60 seconds for demo, put this line back in later				cpu_set_timeout((20 * cpu_ms_2_cy(1000, EC_CPU_CLOCK_FREQ)), &cleanTimer); //DEBUG 11may15 
 
 //				cpu_set_timeout((60 * cpu_ms_2_cy(1000, EC_CPU_CLOCK_FREQ)), &cleanTimer); //DEBUG 24jun15 change to 60 seconds for demo, remove later
-				start_timer(TMR_CLEAN, (3 * SECONDS));
+				start_timer(TMR_CLEAN, (10 * SECONDS));
 				break;	
 				
 			case STATE_CLEAN:
 				if (timer_done(TMR_CLEAN)) {
 					end_timer(TMR_CLEAN);
-					electroclaveState = STATE_VALID_KEYPAD_CODE;	
+					electroclaveState = STATE_EC_IDLE;	
+					print_ecdbg("STATE_EC_IDLE\r\n");
 				}
 				break;
 				
@@ -3077,6 +3290,7 @@ int main(void){
 					led_shelf(i, LED_OFF); //turn off every shelf. (doesn't hurt to make sure that even non-active shelves are off.)
 				}
 				electroclaveState = STATE_EC_IDLE;
+				print_ecdbg("STATE_EC_IDLE\r\n");
 				break;
 		} //switch(electroclaveState)
 		
@@ -3084,6 +3298,7 @@ int main(void){
 		 * This check overrides everything going on in the state machine, if the user opens the door,
 		 * shut down all processes for safety
 		 */
+#if 0 //jsi 25feb16 i think we don't want this at all any more, with EC2 we are worried about someone opening the door with a valid keypad code		
 		if (!EC_DOOR_LATCHED) {
 			
 			controls.buzzer_enable = 1;
@@ -3100,6 +3315,7 @@ int main(void){
 					case STATE_SANITIZE:
 						display_text(IDX_DIRTY);
 						electroclaveState = STATE_SHUTDOWN_PROCESSES;
+						print_ecdbg("STATE_SHUTDOWN_PROCESSES\r\n");
 						print_ecdbg("Door latch opened, shutting down all processes\r\n");
 						break;
 						
@@ -3107,6 +3323,7 @@ int main(void){
 					case STATE_CLEAN:
 						display_text(IDX_CLEAN);
 						electroclaveState = STATE_SHUTDOWN_PROCESSES;
+						print_ecdbg("STATE_SHUTDOWN_PROCESSES\r\n");
 						print_ecdbg("Door latch opened, shutting down all processes\r\n");
 						break;
 						
@@ -3117,6 +3334,7 @@ int main(void){
 					default:
 						display_text(IDX_READY);
 						electroclaveState = STATE_SHUTDOWN_PROCESSES;
+						print_ecdbg("STATE_SHUTDOWN_PROCESSES\r\n");
 						print_ecdbg("Door latch opened, shutting down all processes\r\n");
 						break;
 				}
@@ -3125,6 +3343,7 @@ int main(void){
 				
 			}
 		} //if (!EC_DOOR_LATCHED)
+#endif //jsi 25feb16 maybe we don't want this any more
 		
 		if (timer_done(TMR_DEBUG))
 		{

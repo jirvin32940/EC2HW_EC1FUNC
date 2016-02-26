@@ -33,13 +33,15 @@ extern unsigned long	timerTickCount;
 #define	TMR_ONE_MINUTE		3
 #define	TMR_CLEAN			4
 #define	TMR_ERROR_DISPLAY	5
-#define TIMER_LAST_SEC_IDX	5
+#define TMR_KEYPAD			6
+#define TMR_DOOR_OPEN		7
+#define TIMER_LAST_SEC_IDX	7
 
 /*
  * Timers normally run for less than one second
  */
 #define TIMER_1ST_SUBSEC_IDX	0
-#define TIMER_LAST_IDX			5
+#define TIMER_LAST_IDX			7
 
 #define NUM_TIMERS 				(TIMER_LAST_IDX+1)
 #define NUM_SEC_TIMERS			(TIMER_LAST_SEC_IDX+1)
