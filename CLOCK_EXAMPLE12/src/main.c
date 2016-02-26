@@ -108,6 +108,9 @@ extern void init_pwm(void);
 extern void twi_init(void);
 extern void init_adc(void);
 
+
+void print_ecdbg_num(unsigned int num);
+
 unsigned char read_usage_struct(unsigned char sel);
 unsigned char test_flash(unsigned char sel);
 
@@ -245,6 +248,7 @@ enum {
 uint8_t scan_keypad(void)
 {
 	uint8_t tempKeypad, retKPB, col1, col2, col3, row1, row2, row3;
+	static uint8_t last_retKPB = 0;
 	
 	ioport_set_pin_dir(ECLAVE_COL3, IOPORT_DIR_OUTPUT);
 	ioport_set_pin_dir(ECLAVE_COL2, IOPORT_DIR_OUTPUT);
@@ -285,7 +289,7 @@ uint8_t scan_keypad(void)
 					(col2 << 1) |
 					(col1));
 					
-	switch (tempKeypad)
+	switch(tempKeypad)
 	{
 		case KEYPAD_START:
 		case KEYPAD_SW1:
@@ -293,21 +297,57 @@ uint8_t scan_keypad(void)
 		case KEYPAD_SW3:
 		case KEYPAD_SW4:
 		case KEYPAD_SW5:
-			retKPB = tempKeypad; //only report valid decodings
-			break;
-		default:
-			retKPB = 0;
-			break; 
+			if (last_retKPB != tempKeypad)
+			{
+				switch (tempKeypad)
+				{
+					case KEYPAD_START:
+						print_ecdbg("KPB START, last_retKPB= ");
+						print_ecdbg_num((unsigned int) last_retKPB);
+						print_ecdbg("\r\n");
+						break;
+					case KEYPAD_SW1:
+						print_ecdbg("KPB SW1, last_retKPB= ");
+						print_ecdbg_num((unsigned int) last_retKPB);
+						print_ecdbg("\r\n");
+						break;
+					case KEYPAD_SW2:
+						print_ecdbg("KPB SW2, last_retKPB= ");
+						print_ecdbg_num((unsigned int) last_retKPB);
+						print_ecdbg("\r\n");
+						break;
+					case KEYPAD_SW3:
+						print_ecdbg("KPB SW3, last_retKPB= ");
+						print_ecdbg_num((unsigned int) last_retKPB);
+						print_ecdbg("\r\n");
+						break;
+					case KEYPAD_SW4:
+						print_ecdbg("KPB SW4, last_retKPB= ");
+						print_ecdbg_num((unsigned int) last_retKPB);
+						print_ecdbg("\r\n");
+						break;
+					case KEYPAD_SW5:
+						print_ecdbg("KPB SW5, last_retKPB= ");
+						print_ecdbg_num((unsigned int) last_retKPB);
+						print_ecdbg("\r\n");
+						break;
+				} //switch (tempKeypad)
+					
+				last_retKPB = tempKeypad;
+				return tempKeypad;
+
+		} //if (last_retKPB != tempKeypad)
+		break;
 		
-	}
-	
-	return retKPB;
+	} //switch (tempKeypad)
+
+	return 0;
 }
 
 
 uint8_t kpbState = KPB_START;
 
-uint8_t kpbValidCodes[4] = {KEYPAD_SW1, KEYPAD_SW2, KEYPAD_SW3, KEYPAD_SW4}; //just one valid code for now
+uint8_t kpbValidCodes[4] = {KEYPAD_SW5, KEYPAD_SW4, KEYPAD_SW5, KEYPAD_SW4}; //just one valid code for now
 
 uint8_t process_kpb(void)
 {
@@ -330,7 +370,7 @@ uint8_t process_kpb(void)
 			case KPB_START:
 				if (kpbValidCodes[0] == kpb)
 				{
-					start_timer(TMR_KEYPAD, (2 * SECONDS));
+					start_timer(TMR_KEYPAD, (15 * SECONDS));
 					kpbState = KPB_DIG1;
 					return KPB_CONTINUE;
 				}
@@ -683,7 +723,6 @@ enum {
 };
 
 
-void print_ecdbg_num(unsigned int num);
 void print_ecdbg_num(unsigned int num)
 {
 	char str[6];
@@ -2928,9 +2967,6 @@ int main(void){
 
 	show_sw_version();
 
-	// Print Startup Message
-	display_text(IDX_READY);
-	
 	ioport_set_pin_level(ECLAVE_LED_OEn, IOPORT_PIN_LEVEL_HIGH); //make sure outputs are disabled at the chip level
 
 	
@@ -2956,6 +2992,11 @@ int main(void){
 	
 	controls.buzzer_enable = 0;
 	pwm_channel_disable(PWM0, PIN_PWM_LED0_CHANNEL); //for the love of christ turn this off
+
+
+	// Print Startup Message
+	display_text(IDX_READY);
+	
 
 	start_timer(TMR_DEBUG, ((1*SECONDS)/2));
 
@@ -3177,6 +3218,19 @@ int main(void){
 					electroclaveState = STATE_START_CLEAN;
 					print_ecdbg("STATE_START_CLEAN\r\n");
 				}
+				
+				if ((kpbResult = process_kpb()) == KPB_VALID)
+				//jsi debug 25feb16 temporarily leave this out to debug the rest of the state machine				if (validKeypadCode)
+				{
+					controls.solenoid_enable = true;
+					start_timer(TMR_DOOR_OPEN, (15 * SECONDS)); //TODO: change to 2 minutes for real product
+					electroclaveState = STATE_DOOR_OPEN;
+					print_ecdbg("STATE_DOOR_OPEN\r\n");
+					validKeypadCode = 0; //jsi 25feb16 debug
+					firstTimeSinceDoorLatched = 1;
+				}
+
+				
 				break;
 				
 			case STATE_START_CLEAN:
