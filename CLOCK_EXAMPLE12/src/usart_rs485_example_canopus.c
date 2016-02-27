@@ -226,13 +226,6 @@ void mdelay(uint32_t ul_dly_ticks)
 }
 
 
-#define BUZZER_ON_COUNT		1000	//ms
-#define BUZZER_OFF_COUNT	1000	//ms
-#define SOLENOID_ON_COUNT	500		//ms
-#define SOLENOID_OFF_COUNT	500		//ms
-#define CYCLE_ON			1		
-#define CYCLE_OFF			0
-
 
 struct CONTROLS controls;
 
@@ -294,22 +287,28 @@ void SysTick_Handler(void)
 	
 	if (controls.buzzer_enable)
 	{
-		controls.buzzer_count++;
-		
 		if (controls.buzzer_cycle == CYCLE_ON)
 		{
-			if (controls.buzzer_count > BUZZER_ON_COUNT)
+			if (controls.buzzer_dur_count++ > controls.buzzer_on_dur)
 			{
-				controls.buzzer_count = 0;
-				controls.buzzer_cycle = CYCLE_OFF;
-				pwm_channel_disable(PWM0, PIN_PWM_LED0_CHANNEL);
+				if (controls.buzzer_repeat_count++ >= controls.buzzer_repeat)
+				{
+					controls.buzzer_enable = 0;
+					pwm_channel_disable(PWM0, PIN_PWM_LED0_CHANNEL);
+				}
+				else
+				{
+					controls.buzzer_dur_count = 0;
+					controls.buzzer_cycle = CYCLE_OFF;
+					pwm_channel_disable(PWM0, PIN_PWM_LED0_CHANNEL);
+				}
 			}
 		}
 		else
 		{
-			if (controls.buzzer_count > BUZZER_OFF_COUNT)
+			if (controls.buzzer_dur_count++ > controls.buzzer_off_dur)
 			{
-				controls.buzzer_count = 0;
+				controls.buzzer_dur_count = 0;
 				controls.buzzer_cycle = CYCLE_ON;
 				pwm_channel_enable(PWM0, PIN_PWM_LED0_CHANNEL);
 			}

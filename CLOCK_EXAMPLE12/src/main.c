@@ -14,7 +14,7 @@
  *
  * Redistribution and use in source and binary forms, with or without
  * modification, are permitted provided that the following conditions are met:
- *
+ *TMR
  * 1. Redistributions of source code must retain the above copyright notice,
  *    this list of conditions and the following disclaimer.
  *
@@ -108,7 +108,7 @@ extern void init_pwm(void);
 extern void twi_init(void);
 extern void init_adc(void);
 
-
+void button_beep_buzzer(void);
 void print_ecdbg_num(unsigned int num);
 
 unsigned char read_usage_struct(unsigned char sel);
@@ -145,6 +145,8 @@ unsigned char hourPingPong; //used to toggle between 2 regions of flash each hou
 									//Board 0 upper side and board 4 lower side are not used
 
 unsigned char usageIdx[NUM_LED_BOARD_SIDES];
+
+uint8_t scanKPResult = 0;
 
 enum { BOTTOM, TOP};
 
@@ -210,7 +212,7 @@ enum {
 
 
 /*
- * process_kbp() states
+ * process_kpb() states
  */
 
 enum {
@@ -238,7 +240,7 @@ enum {
  * For example, if ROW3..1 is 0b111 and COL2..1 is 0b01 the packed bits are 0x1D and we recognize that as SW1
  */
 
-#define KEYPAD_START	0x1D
+#define KEYPAD_START	0x0D
 #define KEYPAD_SW1		0x15
 #define KEYPAD_SW2		0x19
 #define KEYPAD_SW3		0x0E
@@ -248,7 +250,8 @@ enum {
 uint8_t scan_keypad(void)
 {
 	uint8_t tempKeypad, retKPB, col1, col2, col3, row1, row2, row3;
-	static uint8_t last_retKPB = 0;
+	static uint8_t last_retKPB = 0, repeatCountSetting = 5;
+	static uint32_t repeatCount = 0;
 	
 	ioport_set_pin_dir(ECLAVE_COL3, IOPORT_DIR_OUTPUT);
 	ioport_set_pin_dir(ECLAVE_COL2, IOPORT_DIR_OUTPUT);
@@ -297,46 +300,55 @@ uint8_t scan_keypad(void)
 		case KEYPAD_SW3:
 		case KEYPAD_SW4:
 		case KEYPAD_SW5:
-			if (last_retKPB != tempKeypad)
+			if (last_retKPB == tempKeypad)
 			{
-				switch (tempKeypad)
+				if (repeatCount++ == repeatCountSetting)
 				{
-					case KEYPAD_START:
-						print_ecdbg("KPB START, last_retKPB= ");
-						print_ecdbg_num((unsigned int) last_retKPB);
-						print_ecdbg("\r\n");
-						break;
-					case KEYPAD_SW1:
-						print_ecdbg("KPB SW1, last_retKPB= ");
-						print_ecdbg_num((unsigned int) last_retKPB);
-						print_ecdbg("\r\n");
-						break;
-					case KEYPAD_SW2:
-						print_ecdbg("KPB SW2, last_retKPB= ");
-						print_ecdbg_num((unsigned int) last_retKPB);
-						print_ecdbg("\r\n");
-						break;
-					case KEYPAD_SW3:
-						print_ecdbg("KPB SW3, last_retKPB= ");
-						print_ecdbg_num((unsigned int) last_retKPB);
-						print_ecdbg("\r\n");
-						break;
-					case KEYPAD_SW4:
-						print_ecdbg("KPB SW4, last_retKPB= ");
-						print_ecdbg_num((unsigned int) last_retKPB);
-						print_ecdbg("\r\n");
-						break;
-					case KEYPAD_SW5:
-						print_ecdbg("KPB SW5, last_retKPB= ");
-						print_ecdbg_num((unsigned int) last_retKPB);
-						print_ecdbg("\r\n");
-						break;
-				} //switch (tempKeypad)
+					button_beep_buzzer();
 					
-				last_retKPB = tempKeypad;
-				return tempKeypad;
+					print_ecdbg("+--------+\r\n");
+					switch (tempKeypad)
+					{
+						case KEYPAD_START:
+							print_ecdbg("KPB START\r\n");
+							break;
+						case KEYPAD_SW1:
+							print_ecdbg("KPB SW1\r\n");
+							break;
+						case KEYPAD_SW2:
+							print_ecdbg("KPB SW2\r\n");
+							break;
+						case KEYPAD_SW3:
+							print_ecdbg("KPB SW3\r\n");
+							break;
+						case KEYPAD_SW4:
+							print_ecdbg("KPB SW4\r\n");
+							break;
+						case KEYPAD_SW5:
+							print_ecdbg("KPB SW5\r\n");
+							break;
+					} //switch (tempKeypad)
 
-		} //if (last_retKPB != tempKeypad)
+					print_ecdbg("repeatCount: ");
+					print_ecdbg_num(repeatCount);
+					print_ecdbg("\r\n");
+
+					last_retKPB = tempKeypad;
+					scanKPResult = tempKeypad;
+					return tempKeypad;
+				}//if (repeatCount++ == 5)
+		} //if (last_retKPB == tempKeypad)
+		else {
+			
+			print_ecdbg("last_retKPB: ");
+			print_ecdbg_num(last_retKPB);
+			print_ecdbg(" tempKeypad: ");
+			print_ecdbg_num(tempKeypad);
+			print_ecdbg("\r\n");
+			
+			last_retKPB = tempKeypad;
+			repeatCount = 0;	
+		}
 		break;
 		
 	} //switch (tempKeypad)
@@ -347,7 +359,7 @@ uint8_t scan_keypad(void)
 
 uint8_t kpbState = KPB_START;
 
-uint8_t kpbValidCodes[4] = {KEYPAD_SW5, KEYPAD_SW4, KEYPAD_SW5, KEYPAD_SW4}; //just one valid code for now
+uint8_t kpbValidCodes[4] = {KEYPAD_SW1, KEYPAD_SW2, KEYPAD_SW3, KEYPAD_SW4}; //just one valid code for now
 
 uint8_t process_kpb(void)
 {
@@ -357,6 +369,7 @@ uint8_t process_kpb(void)
 	{
 		if (timer_done(TMR_KEYPAD))
 		{
+			print_ecdbg("process_kpb() timeout (error)\r\n");
 			end_timer(TMR_KEYPAD); //make sure everything is reset for this timer
 			kpbState = KPB_START;
 			return KPB_ERROR;
@@ -372,6 +385,7 @@ uint8_t process_kpb(void)
 				{
 					start_timer(TMR_KEYPAD, (15 * SECONDS));
 					kpbState = KPB_DIG1;
+					print_ecdbg("KPB State: DIG1\r\n");
 					return KPB_CONTINUE;
 				}
 				break;
@@ -379,6 +393,7 @@ uint8_t process_kpb(void)
 				if (kpbValidCodes[1] == kpb)
 				{
 					kpbState = KPB_DIG2;
+					print_ecdbg("KPB State: DIG2\r\n");
 					return KPB_CONTINUE;
 				}
 				break;
@@ -386,6 +401,7 @@ uint8_t process_kpb(void)
 				if (kpbValidCodes[2] == kpb)
 				{
 					kpbState = KPB_DIG3;
+					print_ecdbg("KPB State: DIG3\r\n");
 					return KPB_CONTINUE;
 				}
 				break;
@@ -393,12 +409,14 @@ uint8_t process_kpb(void)
 				if (kpbValidCodes[3] == kpb)
 				{
 					kpbState = KPB_START;
+					print_ecdbg("KPB State: START\r\n");
 					return KPB_VALID;
 				}
 				break;
 		}
 		
 		kpbState = KPB_START;
+		print_ecdbg("KPB State: START (ERROR)\r\n");
 		return KPB_ERROR; //if we got here, we had a code but it didn't match what was in the list of valid codes
 	}
 	
@@ -420,6 +438,32 @@ unsigned char displayChanged = 0;
 #define NUM_SETS_LED_BOARD_SIDES	12	//should be enough for the lifetime of the unit
 #define LED_BOARD_SIDE_STRUCT_SIZE	10	//bytes
 
+
+void door_ajar_buzzer(void);
+void door_ajar_buzzer(void)
+{
+	controls.buzzer_enable = 1;
+	controls.buzzer_cycle = CYCLE_ON;
+	controls.buzzer_on_dur = 1000;	//ms
+	controls.buzzer_off_dur = 1000;	//ms
+	controls.buzzer_repeat = 0xFF;	//forever essentially
+	controls.buzzer_repeat_count = 0;
+	controls.buzzer_dur_count = 0;
+	pwm_channel_enable(PWM0, PIN_PWM_LED0_CHANNEL); 
+}
+
+
+void button_beep_buzzer(void)
+{
+	controls.buzzer_enable = 1;
+	controls.buzzer_cycle = CYCLE_ON;
+	controls.buzzer_on_dur = 100;	//ms
+	controls.buzzer_off_dur = 0;	//ms
+	controls.buzzer_repeat = 1;		//just one short beep
+	controls.buzzer_repeat_count = 0;
+	controls.buzzer_dur_count = 0;
+	pwm_channel_enable(PWM0, PIN_PWM_LED0_CHANNEL);
+}
 
 
 /*
@@ -2935,6 +2979,7 @@ int main(void){
 	static unsigned char displayIdx = 0;
 	char mainStr[80];
 	uint8_t kpbResult;
+	uint8_t firstTimeSinceShutdown = 1;
 	
 	/* Initialize the SAM system. */
 	sysclk_init();
@@ -3007,8 +3052,7 @@ int main(void){
 		switch(electroclaveState)
 		{
 			case STATE_EC_IDLE:
-#if 0 //EC1 25feb16			
-				if (EC_DOOR_LATCHED) {
+				if (EC_DOOR_LATCHED && firstTimeSinceShutdown) {
 					controls.buzzer_enable = 0;
 					pwm_channel_disable(PWM0, PIN_PWM_LED0_CHANNEL);
 					ioport_set_pin_level(EXAMPLE_LED_GPIO, IOPORT_PIN_LEVEL_LOW);
@@ -3016,11 +3060,11 @@ int main(void){
 					firstTimeSinceDoorLatched = 1;
 //					display_text(IDX_CLEAR);
 					display_text(IDX_READY);
-					electroclaveState = STATE_DOOR_LATCHED;
 					firstDoorOpenSinceIdle = 1;
+					firstTimeSinceShutdown = 0;
 				}
-#endif //EC1 25feb16
-				if ((kpbResult = process_kpb()) == KPB_VALID)
+
+				if (kpbResult == KPB_VALID)
 //jsi debug 25feb16 temporarily leave this out to debug the rest of the state machine				if (validKeypadCode)
 				{
 					controls.solenoid_enable = true;
@@ -3035,18 +3079,21 @@ int main(void){
 			case STATE_DOOR_OPEN:
 				if (timer_done(TMR_DOOR_OPEN))
 				{
-					controls.buzzer_enable = true;
+					door_ajar_buzzer();
 					electroclaveState = STATE_DOOR_AJAR;
 					print_ecdbg("STATE_DOOR_AJAR\r\n");
 
 				}
-				if (((kpbResult = scan_keypad()) == KEYPAD_START) && EC_DOOR_LATCHED)
+				if (scanKPResult == KEYPAD_START)
 //jsi 25feb16 debug				if (startButtonPressed)
 				{
-					end_timer(TMR_DOOR_OPEN);
-					electroclaveState = STATE_DOOR_LATCHED;
-					print_ecdbg("STATE_DOOR_LATCHED\r\n");
-					startButtonPressed = 0; //jsi 25feb16 debug
+					if (EC_DOOR_LATCHED)
+					{
+						end_timer(TMR_DOOR_OPEN);
+						electroclaveState = STATE_DOOR_LATCHED;
+						print_ecdbg("STATE_DOOR_LATCHED\r\n");
+						startButtonPressed = 0; //jsi 25feb16 debug
+					}
 				}
 				break;
 			
@@ -3219,18 +3266,6 @@ int main(void){
 					print_ecdbg("STATE_START_CLEAN\r\n");
 				}
 				
-				if ((kpbResult = process_kpb()) == KPB_VALID)
-				//jsi debug 25feb16 temporarily leave this out to debug the rest of the state machine				if (validKeypadCode)
-				{
-					controls.solenoid_enable = true;
-					start_timer(TMR_DOOR_OPEN, (15 * SECONDS)); //TODO: change to 2 minutes for real product
-					electroclaveState = STATE_DOOR_OPEN;
-					print_ecdbg("STATE_DOOR_OPEN\r\n");
-					validKeypadCode = 0; //jsi 25feb16 debug
-					firstTimeSinceDoorLatched = 1;
-				}
-
-				
 				break;
 				
 			case STATE_START_CLEAN:
@@ -3249,8 +3284,8 @@ int main(void){
 			case STATE_CLEAN:
 				if (timer_done(TMR_CLEAN)) {
 					end_timer(TMR_CLEAN);
-					electroclaveState = STATE_EC_IDLE;	
-					print_ecdbg("STATE_EC_IDLE\r\n");
+					electroclaveState = STATE_START_SANITIZE;	
+					print_ecdbg("STATE_START_SANITIZE\r\n");
 				}
 				break;
 				
@@ -3343,8 +3378,13 @@ int main(void){
 				{
 					led_shelf(i, LED_OFF); //turn off every shelf. (doesn't hurt to make sure that even non-active shelves are off.)
 				}
-				electroclaveState = STATE_EC_IDLE;
-				print_ecdbg("STATE_EC_IDLE\r\n");
+				if (timer_done(TMR_DIRTY))
+				{
+					end_timer(TMR_DIRTY);
+					electroclaveState = STATE_EC_IDLE;
+					print_ecdbg("STATE_EC_IDLE\r\n");
+				}
+				firstTimeSinceShutdown = 1;
 				break;
 		} //switch(electroclaveState)
 		
@@ -3352,10 +3392,11 @@ int main(void){
 		 * This check overrides everything going on in the state machine, if the user opens the door,
 		 * shut down all processes for safety
 		 */
-#if 0 //jsi 25feb16 i think we don't want this at all any more, with EC2 we are worried about someone opening the door with a valid keypad code		
-		if (!EC_DOOR_LATCHED) {
-			
-			controls.buzzer_enable = 1;
+		if (((kpbResult = process_kpb()) == KPB_VALID)  && (electroclaveState != STATE_EC_IDLE))
+		{
+			controls.solenoid_enable = true;
+			start_timer(TMR_DOOR_OPEN, (15 * SECONDS)); //TODO: change to 2 minutes for real product
+
 
 			if (firstDoorOpenSinceIdle)
 			{
@@ -3371,6 +3412,7 @@ int main(void){
 						electroclaveState = STATE_SHUTDOWN_PROCESSES;
 						print_ecdbg("STATE_SHUTDOWN_PROCESSES\r\n");
 						print_ecdbg("Door latch opened, shutting down all processes\r\n");
+						start_timer(TMR_DIRTY, (8 * SECONDS));
 						break;
 						
 					case STATE_START_CLEAN:
@@ -3397,7 +3439,6 @@ int main(void){
 				
 			}
 		} //if (!EC_DOOR_LATCHED)
-#endif //jsi 25feb16 maybe we don't want this any more
 		
 		if (timer_done(TMR_DEBUG))
 		{
