@@ -3258,7 +3258,7 @@ int main(void){
 					
 					for (int i=0; i< NUM_SHELVES; i++)
 					{
-						led_shelf(i, LED_OFF); //turn off every shelf. (doesn't hurt to make sure that even non-active shelves are off.)
+//DEBUG 24may16 THIS IS REALLY SLOPPY, WANT TO KEEP THE LEDS ON FOR 30 MINUTES BUT THE TIMER STUFF DOESN'T SEEM TO WORK THAT LONG, SO WE ARE JUST NOT GOING TO TURN THE SHELVES OFF						led_shelf(i, LED_OFF); //turn off every shelf. (doesn't hurt to make sure that even non-active shelves are off.)
 					}
 					end_timer(TMR_SANITIZE);
 					print_ecdbg("Shelf clean\r\n");
@@ -3378,7 +3378,7 @@ int main(void){
 				{
 					led_shelf(i, LED_OFF); //turn off every shelf. (doesn't hurt to make sure that even non-active shelves are off.)
 				}
-				if (timer_done(TMR_DIRTY))
+//jsi 4may16 experiment, does this let you start after DIRTY state??				if (timer_done(TMR_DIRTY))
 				{
 					end_timer(TMR_DIRTY);
 					electroclaveState = STATE_EC_IDLE;
